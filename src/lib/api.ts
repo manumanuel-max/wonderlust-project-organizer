@@ -24,6 +24,7 @@ import type {
   StructureResult,
   TreeNode,
   Category,
+  TransferOptions,
 } from "./types";
 
 export const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -74,7 +75,8 @@ export const api = {
   resolveConflicts: (items: { id: number; resolution: Resolution | null }[], applyToEquivalent: boolean) =>
     call<{ conflicts: Conflict[]; unresolved: number }>("resolve_conflicts", { items, applyToEquivalent }),
 
-  startJob: (client: string, project: string) => call<string>("start_job", { params: { client, project } }),
+  startJob: (client: string, project: string, transfer: TransferOptions) =>
+    call<string>("start_job", { params: { client, project, transfer } }),
   pauseJob: (jobId: string) => call<void>("pause_job", { jobId }),
   resumeJob: (jobId: string) => call<void>("resume_job", { jobId }),
   cancelJob: (jobId: string) => call<void>("cancel_job", { jobId }),
@@ -89,11 +91,24 @@ export const api = {
   exportReport: (jobId: string, format: "csv" | "json" | "txt" | "pathmap", path: string) =>
     call<string>("export_report", { jobId, format, path }),
 
+  updateConfig: () => call<{ configured: boolean; currentVersion: string; channel: string | null }>("update_config"),
+  checkUpdate: () => call<{ version: string; currentVersion: string; date: string | null; notes: string | null } | null>("check_update"),
+  installUpdate: () => call<void>("install_update"),
+  restartApp: () => call<void>("restart_app"),
+
+  takeLaunchPaths: () => call<string[]>("take_launch_paths"),
+  contextMenuStatus: () => call<{ supported: boolean; installed: boolean; location: string; hint: string }>("context_menu_status"),
+  setContextMenu: (enabled: boolean) =>
+    call<{ supported: boolean; installed: boolean; location: string; hint: string }>("set_context_menu", { enabled }),
+
   historyList: () => call<HistoryEntry[]>("history_list"),
   historyDelete: (ids: string[], deleteReports: boolean) => call<number>("history_delete", { ids, deleteReports }),
 };
 
 export const events = {
+  onOpenPaths: (cb: (paths: string[]) => void): Promise<UnlistenFn> => listen<string[]>("open-paths", (e) => cb(e.payload)),
+  onUpdateProgress: (cb: (p: { downloaded: number; total: number | null }) => void): Promise<UnlistenFn> =>
+    listen<{ downloaded: number; total: number | null }>("update-progress", (e) => cb(e.payload)),
   onScanProgress: (cb: (p: { files: number; bytes: number }) => void): Promise<UnlistenFn> =>
     listen<{ files: number; bytes: number }>("scan-progress", (e) => cb(e.payload)),
   onAnalysisProgress: (cb: (p: { phase: string; done: number; total: number }) => void): Promise<UnlistenFn> =>

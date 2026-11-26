@@ -42,7 +42,7 @@ function Entries({ jobId, report }: { jobId: string; report: JobReport }) {
               { value: "error", label: "Errores", count: t.failed, tone: "danger" },
               { value: "pendiente", label: "Pendientes", count: t.pending, tone: "warn" },
               { value: "omitido", label: "Omitidos", count: t.skipped },
-              { value: "copiado", label: "Copiados", count: t.copied },
+              { value: "copiado", label: report.transfer?.mode === "move" ? "Procesados" : "Copiados", count: t.copied },
               { value: "excluido", label: "Excluidos", count: t.excluded },
             ]}
           />
@@ -114,6 +114,7 @@ export function ReportBody({ jobId, onRetry }: { jobId: string; onRetry?: () => 
   if (error) return <p className="py-10 text-center text-xs text-muted">{error}</p>;
   if (!report) return <div className="flex justify-center py-12"><Spinner /></div>;
   const t = report.totals;
+  const moving = report.transfer?.mode === "move";
 
   const exportAs = async (format: "csv" | "json" | "txt" | "pathmap") => {
     const ext = format === "pathmap" ? "csv" : format;
@@ -151,7 +152,7 @@ export function ReportBody({ jobId, onRetry }: { jobId: string; onRetry?: () => 
             {report.success ? <CheckCircle2 className="h-6 w-6" /> : <XCircle className="h-6 w-6" />}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-lg font-semibold tracking-tight">{report.success ? "Backup completado y verificado" : report.statusLabel}</div>
+            <div className="text-lg font-semibold tracking-tight">{report.success ? (moving ? "Movimiento completado y verificado" : "Backup completado y verificado") : report.statusLabel}</div>
             <p className="selectable mt-0.5 text-[13px] text-muted">{report.integrityMessage}</p>
             {report.abortedReason && <p className="mt-1 text-[13px] text-danger">Motivo: {report.abortedReason}</p>}
             <div className="mt-2 text-xs text-faint">
@@ -160,7 +161,7 @@ export function ReportBody({ jobId, onRetry }: { jobId: string; onRetry?: () => 
           </div>
         </div>
         <div className="mt-6 grid grid-cols-2 gap-5 border-t border-line pt-5 md:grid-cols-7">
-          <Stat label="Copiados" value={formatNumber(t.copied)} sub={formatSize(t.bytesCopied)} tone="ok" />
+          <Stat label={moving ? "Procesados" : "Copiados"} value={formatNumber(t.copied)} sub={formatSize(t.bytesCopied)} tone="ok" />
           <Stat label="Verificados" value={formatNumber(t.verified)} sub={report.integrityMode === "full" ? "SHA-256" : "por tamaño"} />
           <Stat label="Omitidos" value={formatNumber(t.skipped)} />
           <Stat label="Duplicados" value={formatNumber(t.duplicates)} sub="omitidos" />
@@ -168,6 +169,20 @@ export function ReportBody({ jobId, onRetry }: { jobId: string; onRetry?: () => 
           <Stat label="Errores" value={formatNumber(t.failed + t.pending)} tone={t.failed + t.pending ? "danger" : undefined} sub={t.pending ? `${t.pending} pendientes` : undefined} />
           <Stat label="Tiempo" value={formatDuration(report.durationMs)} />
         </div>
+        {moving && (
+          <div className="mt-5 grid grid-cols-2 gap-5 border-t border-line pt-5 md:grid-cols-5">
+            <Stat label="Movidos (mismo disco)" value={formatNumber(t.movedSameDisk ?? 0)} />
+            <Stat label="Originales a Papelera" value={formatNumber(t.originalsTrashed ?? 0)} />
+            <Stat label="Originales eliminados" value={formatNumber(t.originalsDeleted ?? 0)} />
+            <Stat
+              label="Originales no retirados"
+              value={formatNumber(t.originalsNotRemoved ?? 0)}
+              tone={t.originalsNotRemoved ? "warn" : undefined}
+              sub={t.originalsNotRemoved ? "siguen en su sitio" : undefined}
+            />
+            <Stat label="Carpetas vacías retiradas" value={formatNumber(t.prunedDirs ?? 0)} />
+          </div>
+        )}
         <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-line pt-5">
           <div className="mr-auto min-w-0 max-w-[50%]">
             <div className="text-2xs uppercase tracking-wider text-faint">Destino</div>

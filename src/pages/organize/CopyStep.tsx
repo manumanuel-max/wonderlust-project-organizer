@@ -35,6 +35,7 @@ export default function CopyStep() {
   if (!jobId) return null;
   const p = progress;
   const pct = p ? percent(p.bytesDone, p.bytesTotal) : 0;
+  const moving = status?.transfer?.mode === "move";
 
   const act = (fn: () => Promise<void>) => fn().catch((e) => toast("error", e.message));
 
@@ -46,18 +47,18 @@ export default function CopyStep() {
             <div className="min-w-0">
               <div className="text-2xs uppercase tracking-wider text-faint">{status?.kind ?? "Copia"}</div>
               <div className="mt-1 truncate text-lg font-semibold tracking-tight">
-                {[status?.client, status?.project].filter(Boolean).join(" — ") || "Copiando proyecto"}
+                {[status?.client, status?.project].filter(Boolean).join(" — ") || (moving ? "Moviendo proyecto" : "Copiando proyecto")}
               </div>
               {status && <PathText path={status.destRoot} className="mt-0.5" />}
             </div>
             <div className="text-right">
               <div className="text-3xl font-semibold tabular-nums tracking-tight">{pct.toFixed(1).replace(".", ",")} %</div>
-              <div className="text-xs text-muted">{p?.paused ? "En pausa" : "Copiando y verificando"}</div>
+              <div className="text-xs text-muted">{p?.paused ? "En pausa" : moving ? "Moviendo y verificando" : "Copiando y verificando"}</div>
             </div>
           </div>
           <ProgressBar value={pct} className="mt-5 h-2.5" tone={p?.paused ? "warn" : "accent"} animated={!p?.paused} />
           <div className="mt-6 grid grid-cols-2 gap-5 md:grid-cols-6">
-            <Stat label="Transferido" value={formatSize(p?.bytesDone ?? 0)} sub={`de ${formatSize(p?.bytesTotal ?? 0)}`} />
+            <Stat label={moving ? "Procesado" : "Transferido"} value={formatSize(p?.bytesDone ?? 0)} sub={`de ${formatSize(p?.bytesTotal ?? 0)}`} />
             <Stat label="Archivos" value={`${formatNumber(p?.filesDone ?? 0)}`} sub={`de ${formatNumber(p?.filesTotal ?? 0)}`} />
             <Stat label="Velocidad" value={formatSpeed(p?.speedBps ?? 0)} />
             <Stat label="Transcurrido" value={formatDuration(p?.elapsedMs ?? 0)} />
@@ -109,7 +110,7 @@ export default function CopyStep() {
       <Modal
         open={cancelOpen}
         onClose={() => setCancelOpen(false)}
-        title="¿Cancelar la copia?"
+        title={moving ? "¿Cancelar el movimiento?" : "¿Cancelar la copia?"}
         footer={
           <>
             <Button variant="ghost" onClick={() => setCancelOpen(false)}>
@@ -122,14 +123,15 @@ export default function CopyStep() {
                 act(() => api.cancelJob(jobId));
               }}
             >
-              Cancelar copia
+              {moving ? "Cancelar movimiento" : "Cancelar copia"}
             </Button>
           </>
         }
       >
         <p className="text-[13px] text-muted">
-          El archivo en curso se descarta de forma segura. Los archivos ya verificados permanecen en el destino y podrás reanudar más tarde. El backup quedará marcado
-          como incompleto.
+          El archivo en curso se descarta de forma segura. Los archivos ya verificados permanecen en el destino y podrás reanudar más tarde. La operación quedará
+          marcada como incompleta.
+          {moving && " Los archivos que aún no se procesaron siguen en su ubicación original."}
         </p>
       </Modal>
     </div>

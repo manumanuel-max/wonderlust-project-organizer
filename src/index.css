@@ -4,19 +4,22 @@
 
 :root,
 :root.dark {
-  --bg: 13 14 17;
-  --panel: 20 22 27;
-  --raised: 28 31 38;
-  --line: 40 44 53;
-  --fg: 236 237 241;
-  --muted: 154 160 172;
-  --faint: 98 104 116;
-  --accent: 255 112 77;
+  /* Marca Wonderlust: tinta #16161B, crema #F3F1ED, amarillo #F6B60E */
+  --bg: 22 22 27;
+  --panel: 29 29 35;
+  --raised: 37 37 44;
+  --line: 50 50 59;
+  --fg: 243 241 237;
+  --muted: 165 162 156;
+  --faint: 110 108 104;
+  --accent: 246 182 14;
+  --on-accent: 22 22 27;
+  --brand: 246 182 14;
   --ok: 84 214 152;
-  --warn: 250 184 70;
+  --warn: 250 160 60;
   --danger: 248 92 92;
   --cat-imagen: 255 122 89;
-  --cat-video: 255 176 72;
+  --cat-video: 246 182 14;
   --cat-audio: 120 220 170;
   --cat-editable: 110 170 255;
   --cat-archivos: 190 140 255;
@@ -24,19 +27,21 @@
 }
 
 :root.light {
-  --bg: 244 244 246;
-  --panel: 255 255 255;
-  --raised: 247 247 249;
-  --line: 224 225 230;
-  --fg: 22 23 28;
-  --muted: 92 97 110;
-  --faint: 150 155 166;
-  --accent: 232 84 48;
+  --bg: 243 241 237;
+  --panel: 251 250 247;
+  --raised: 234 231 225;
+  --line: 219 215 207;
+  --fg: 22 22 27;
+  --muted: 92 90 86;
+  --faint: 150 146 139;
+  --accent: 214 152 0;
+  --on-accent: 22 22 27;
+  --brand: 22 22 27;
   --ok: 22 150 96;
-  --warn: 196 128 10;
+  --warn: 200 110 10;
   --danger: 214 52 52;
   --cat-imagen: 226 88 56;
-  --cat-video: 214 132 18;
+  --cat-video: 196 140 0;
   --cat-audio: 30 160 108;
   --cat-editable: 50 120 230;
   --cat-archivos: 140 86 220;

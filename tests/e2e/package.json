@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "flujo": "node e2e.mjs",
-    "reanudacion": "node e2e-resume.mjs"
+    "reanudacion": "node e2e-resume.mjs",
+    "mover": "node e2e-move.mjs"
   },
   "devDependencies": {
     "selenium-webdriver": "4.25.0"

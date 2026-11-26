@@ -2,6 +2,7 @@
 //! archivo de prueba de escritura que se elimina inmediatamente) y nada se
 //! modifica en el origen.
 
+use crate::copy::TransferMode;
 use crate::duplicates::{OpAction, OperationSet};
 use crate::paths::{best_effort_canonical, is_within, join_rel, name_issues, WINDOWS_MAX_PATH};
 use serde::{Deserialize, Serialize};
@@ -38,6 +39,58 @@ pub struct PreflightReport {
     pub files_to_copy: usize,
     pub files_skipped: usize,
     pub filesystem: Option<String>,
+    /// Espacio necesario si se elige mover (lo que está en el mismo disco no ocupa espacio extra).
+    #[serde(default)]
+    pub required_bytes_move: u64,
+    /// `false` si no hay espacio para copiar, aunque sí lo haya para mover.
+    #[serde(default = "yes")]
+    pub copy_possible: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// Identificador del volumen que contiene `p` (o su ancestro existente más cercano).
+pub fn volume_id(p: &Path) -> Option<String> {
+    let base = nearest_existing(p)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return std::fs::metadata(&base).ok().map(|m| m.dev().to_string());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::GetVolumePathNameW;
+        let wide: Vec<u16> = base.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let mut vol = [0u16; 261];
+        // SAFETY: búfer de tamaño correcto.
+        if unsafe { GetVolumePathNameW(wide.as_ptr(), vol.as_mut_ptr(), vol.len() as u32) } == 0 {
+            return None;
+        }
+        let len = vol.iter().position(|c| *c == 0).unwrap_or(0);
+        return Some(String::from_utf16_lossy(&vol[..len]).to_lowercase());
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = base;
+        None
+    }
+}
+
+/// `true` si se puede retirar un archivo de la carpeta `dir` (permiso de escritura).
+fn dir_writable(dir: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        let Ok(c) = CString::new(dir.as_os_str().as_bytes()) else { return false };
+        // SAFETY: cadena terminada en NUL.
+        return unsafe { libc::access(c.as_ptr(), libc::W_OK) } == 0;
+    }
+    #[allow(unreachable_code)]
+    std::fs::metadata(dir).map(|m| !m.permissions().readonly()).unwrap_or(false)
 }
 
 /// Ancestro existente más cercano.
@@ -146,6 +199,18 @@ pub fn run_preflight(
     sources: &[PathBuf],
     dest_root: &Path,
     cancel: &AtomicBool,
+    progress: impl FnMut(usize, usize),
+) -> PreflightReport {
+    run_preflight_for(ops, sources, dest_root, None, cancel, progress)
+}
+
+/// Verificación previa. `mode = None` cuando el usuario aún no eligió copiar o mover.
+pub fn run_preflight_for(
+    ops: &OperationSet,
+    sources: &[PathBuf],
+    dest_root: &Path,
+    mode: Option<TransferMode>,
+    cancel: &AtomicBool,
     mut progress: impl FnMut(usize, usize),
 ) -> PreflightReport {
     let mut issues = Vec::new();
@@ -231,11 +296,33 @@ pub fn run_preflight(
         }
     }
 
-    // 4. Espacio disponible (con margen del 1 % + 50 MB).
+    // 4. Espacio disponible (con margen del 1 % + 50 MB). Al mover dentro del
+    //    mismo disco no se necesita espacio adicional.
+    let dest_vol = volume_id(dest_root);
+    let mut vol_cache: std::collections::HashMap<PathBuf, Option<String>> = std::collections::HashMap::new();
+    let required_move: u64 = copies
+        .iter()
+        .filter(|o| {
+            let parent = o.src.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+            let v = vol_cache.entry(parent.clone()).or_insert_with(|| volume_id(&parent)).clone();
+            !(v.is_some() && v == dest_vol)
+        })
+        .map(|o| o.size)
+        .sum();
+    let margin = |b: u64| b + b / 100 + 50 * 1024 * 1024;
     let available = available_space(dest_root);
+    let mut copy_possible = true;
     if let Some(av) = available {
-        let needed = required + required / 100 + 50 * 1024 * 1024;
-        if needed > av {
+        let copy_fits = margin(required) <= av;
+        let move_fits = required_move == 0 || margin(required_move) <= av;
+        copy_possible = copy_fits;
+        let blocking_now = match mode {
+            Some(TransferMode::Move) => !move_fits,
+            Some(TransferMode::Copy) => !copy_fits,
+            None => !copy_fits && !move_fits,
+        };
+        if blocking_now {
+            let needed = if mode == Some(TransferMode::Move) { margin(required_move) } else { margin(required) };
             issues.push(issue(
                 "no-space",
                 IssueLevel::Blocking,
@@ -246,6 +333,36 @@ pub fn run_preflight(
                     crate::report::human_size(av)
                 ),
                 vec![],
+            ));
+        } else if !copy_fits {
+            issues.push(issue(
+                "no-space-copy",
+                IssueLevel::Warning,
+                "No hay espacio para copiar, pero sí para mover".into(),
+                format!(
+                    "Copiar necesita {} y hay {} disponibles. Al mover dentro del mismo disco no se ocupa espacio adicional.",
+                    crate::report::human_size(margin(required)),
+                    crate::report::human_size(av)
+                ),
+                vec![],
+            ));
+        }
+    }
+
+    // 4b. Permiso para retirar originales (relevante al mover).
+    if mode != Some(TransferMode::Copy) {
+        let mut dirs: Vec<PathBuf> = copies.iter().filter_map(|o| o.src.parent().map(|p| p.to_path_buf())).collect();
+        dirs.sort();
+        dirs.dedup();
+        let locked: Vec<String> = dirs.iter().filter(|d| !dir_writable(d)).map(|d| d.display().to_string()).collect();
+        if !locked.is_empty() {
+            issues.push(issue(
+                "source-not-removable",
+                if mode == Some(TransferMode::Move) { IssueLevel::Warning } else { IssueLevel::Info },
+                format!("{} carpeta(s) del origen son de solo lectura", locked.len()),
+                "Si eliges mover, los archivos de estas carpetas se copiarán y verificarán, pero los originales no se podrán retirar."
+                    .into(),
+                locked,
             ));
         }
     }
@@ -344,6 +461,8 @@ pub fn run_preflight(
         files_to_copy: copies.len(),
         files_skipped: skipped,
         filesystem: fs,
+        required_bytes_move: required_move,
+        copy_possible,
     }
 }
 
@@ -409,9 +528,20 @@ mod tests {
         let src = d.path().join("src");
         std::fs::create_dir_all(&src).unwrap();
         std::fs::write(src.join("a.mov"), b"1").unwrap();
-        let r = run_preflight(&ops(&src, &[("a.mov", u64::MAX / 4)]), &[src.clone()], &d.path().join("P"), &AtomicBool::new(false), |_, _| {});
+        let o = ops(&src, &[("a.mov", u64::MAX / 4)]);
+        let dest = d.path().join("P");
+        let r = run_preflight_for(&o, &[src.clone()], &dest, Some(TransferMode::Copy), &AtomicBool::new(false), |_, _| {});
         assert!(r.issues.iter().any(|i| i.code == "no-space"));
         assert!(!r.ok);
+        // Mismo disco: mover no necesita espacio adicional, así que no bloquea.
+        let r = run_preflight_for(&o, &[src.clone()], &dest, Some(TransferMode::Move), &AtomicBool::new(false), |_, _| {});
+        assert!(r.ok, "{:?}", r.issues);
+        assert_eq!(r.required_bytes_move, 0);
+        assert!(!r.copy_possible);
+        // Sin elegir modo todavía: aviso (no bloqueo) de que solo se puede mover.
+        let r = run_preflight(&o, &[src.clone()], &dest, &AtomicBool::new(false), |_, _| {});
+        assert!(r.ok);
+        assert!(r.issues.iter().any(|i| i.code == "no-space-copy"));
     }
 
     #[test]

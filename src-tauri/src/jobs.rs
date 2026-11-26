@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
-use wpo_core::copy::{self, JobControl, JobManifest, Journal, OpResult, Progress};
+use wpo_core::copy::{self, JobControl, JobManifest, Journal, OpResult, Progress, TransferMode, TransferOptions};
 use wpo_core::duplicates::{self, OpAction};
 use wpo_core::history::{self, HistoryEntry};
 use wpo_core::plan::{OrganizeMode, WarningLevel};
@@ -34,10 +34,21 @@ struct JobFinishedEvent {
     success: bool,
 }
 
-fn kind_label(kind: &str) -> &'static str {
-    match kind {
-        "backup" => "Backup conservando jerarquía",
+fn kind_label(kind: &str, transfer: TransferMode) -> &'static str {
+    match (kind, transfer) {
+        ("backup", TransferMode::Copy) => "Backup conservando jerarquía",
+        ("backup", TransferMode::Move) => "Mover conservando jerarquía",
+        (_, TransferMode::Move) => "Mover y organizar proyecto",
         _ => "Organizar proyecto",
+    }
+}
+
+/// Tipo de operación para el historial.
+fn history_kind(m: &JobManifest) -> String {
+    if m.transfer.mode == TransferMode::Move {
+        "move".into()
+    } else {
+        m.kind.clone()
     }
 }
 
@@ -128,7 +139,7 @@ fn spawn_job(app: AppHandle, manifest: JobManifest, only: Option<HashSet<u32>>) 
             date: manifest.created_at.clone(),
             client: manifest.client.clone(),
             project: manifest.project.clone(),
-            kind: manifest.kind.clone(),
+            kind: history_kind(&manifest),
             destination: manifest.dest_root.display().to_string(),
             files: manifest.ops.iter().filter(|o| o.action == OpAction::Copy).count(),
             size: manifest.ops.iter().filter(|o| o.action == OpAction::Copy).map(|o| o.size).sum(),
@@ -162,7 +173,7 @@ fn spawn_job(app: AppHandle, manifest: JobManifest, only: Option<HashSet<u32>>) 
                             date: manifest.created_at.clone(),
                             client: manifest.client.clone(),
                             project: manifest.project.clone(),
-                            kind: manifest.kind.clone(),
+                            kind: history_kind(&manifest),
                             destination: manifest.dest_root.display().to_string(),
                             files: rep.totals.copied,
                             size: rep.totals.bytes_copied,
@@ -182,6 +193,7 @@ fn spawn_job(app: AppHandle, manifest: JobManifest, only: Option<HashSet<u32>>) 
                             aborted_reason: Some(e.to_string()),
                             duration_ms: 0,
                             bytes_copied: 0,
+                            pruned_dirs: 0,
                         },
                         copy::now_iso(),
                     );
@@ -193,7 +205,7 @@ fn spawn_job(app: AppHandle, manifest: JobManifest, only: Option<HashSet<u32>>) 
                             date: manifest.created_at.clone(),
                             client: manifest.client.clone(),
                             project: manifest.project.clone(),
-                            kind: manifest.kind.clone(),
+                            kind: history_kind(&manifest),
                             destination: manifest.dest_root.display().to_string(),
                             files: 0,
                             size: 0,
@@ -216,6 +228,8 @@ fn spawn_job(app: AppHandle, manifest: JobManifest, only: Option<HashSet<u32>>) 
 pub struct StartJobParams {
     pub client: String,
     pub project: String,
+    #[serde(default)]
+    pub transfer: TransferOptions,
 }
 
 #[tauri::command]
@@ -229,12 +243,20 @@ pub async fn start_job(app: AppHandle, state: State<'_, AppState>, params: Start
         (s.plan.clone(), a, s.resolutions.clone(), d, s.inventory.sources.clone(), s.options.mode)
     };
     let ops = duplicates::build_operations(&plan, &analysis, &resolutions, settings.duplicates.policy, &dest).map_err(err)?;
+    let params_mode = params.transfer.mode;
     // Repetir la verificación previa justo antes de copiar (la unidad pudo desconectarse).
     let (ops, pf) = tauri::async_runtime::spawn_blocking({
         let sources = sources.clone();
         let dest = dest.clone();
         move || {
-            let pf = preflight::run_preflight(&ops, &sources, &dest, &std::sync::atomic::AtomicBool::new(false), |_, _| {});
+            let pf = preflight::run_preflight_for(
+                &ops,
+                &sources,
+                &dest,
+                Some(params_mode),
+                &std::sync::atomic::AtomicBool::new(false),
+                |_, _| {},
+            );
             (ops, pf)
         }
     })
@@ -264,6 +286,7 @@ pub async fn start_job(app: AppHandle, state: State<'_, AppState>, params: Start
         excluded: ops.excluded,
         settings: settings.copy.clone(),
         warnings,
+        transfer: params.transfer,
     };
     save_json(&manifest_path(&state, &job_id), &manifest).map_err(err)?;
     if let Some(parent) = dest.parent() {
@@ -307,6 +330,7 @@ pub struct JobStatus {
     pub client: String,
     pub project: String,
     pub dest_root: String,
+    pub transfer: TransferOptions,
 }
 
 #[tauri::command]
@@ -317,10 +341,11 @@ pub fn job_status(state: State<AppState>, job_id: String) -> CmdResult<JobStatus
     Ok(JobStatus {
         running: running.is_some(),
         progress: running.and_then(|j| j.last_progress.lock().unwrap().clone()),
-        kind: kind_label(&m.kind).into(),
+        kind: kind_label(&m.kind, m.transfer.mode).into(),
         client: m.client,
         project: m.project,
         dest_root: m.dest_root.display().to_string(),
+        transfer: m.transfer,
     })
 }
 
@@ -365,7 +390,7 @@ pub async fn list_interrupted_jobs(state: State<'_, AppState>) -> CmdResult<Vec<
             bytes_total: copies.iter().map(|o| o.size).sum(),
             job_id: id,
             created_at: m.created_at,
-            kind: kind_label(&m.kind).into(),
+            kind: kind_label(&m.kind, m.transfer.mode).into(),
             client: m.client,
             project: m.project,
             dest_root: m.dest_root.display().to_string(),
@@ -431,7 +456,7 @@ pub async fn get_report(state: State<'_, AppState>, job_id: String) -> CmdResult
     let mut r = load_report(&state, &job_id)?;
     r.entries.clear();
     r.excluded.truncate(500);
-    Ok(ReportView { kind_label: kind_label(&r.kind).into(), report: r })
+    Ok(ReportView { kind_label: kind_label(&r.kind, r.transfer.mode).into(), report: r })
 }
 
 #[derive(Serialize)]

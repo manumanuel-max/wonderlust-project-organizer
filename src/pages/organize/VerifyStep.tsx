@@ -1,10 +1,10 @@
-import { AlertOctagon, AlertTriangle, ArrowLeft, Copy, Info, RefreshCw, ShieldCheck } from "lucide-react";
+import { AlertOctagon, AlertTriangle, ArrowLeft, Copy, Info, MoveRight, RefreshCw, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge, Button, Card, Checkbox, cx, Input, Modal, PathText, ProgressBar, Select, Spinner, Stat } from "../../components/ui";
 import { api, events } from "../../lib/api";
 import { formatNumber, formatSize, formatUnix, percent } from "../../lib/format";
 import { useStore } from "../../lib/store";
-import type { Conflict, PreflightIssue, Resolution } from "../../lib/types";
+import type { Conflict, PreflightIssue, RemovalMode, Resolution, TransferMode } from "../../lib/types";
 import { destinationRoot } from "./common";
 import { WarningCard } from "./ReviewStep";
 
@@ -64,6 +64,9 @@ export default function VerifyStep() {
   const [newName, setNewName] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [ack, setAck] = useState(false);
+  const [mode, setMode] = useState<TransferMode>("copy");
+  const [removal, setRemoval] = useState<RemovalMode>(settings.moveRemoval ?? "trash");
+  const [moveAck, setMoveAck] = useState(false);
   const [starting, setStarting] = useState(false);
   const started = useRef(false);
   const a = o.analysis;
@@ -105,7 +108,7 @@ export default function VerifyStep() {
   const start = async () => {
     setStarting(true);
     try {
-      const id = await api.startJob(o.client, o.project);
+      const id = await api.startJob(o.client, o.project, { mode, removal });
       setConfirmOpen(false);
       patch({ jobId: id, step: "copy" });
     } catch (e) {
@@ -283,8 +286,18 @@ export default function VerifyStep() {
           <div className="flex items-center gap-3">
             {a && a.unresolved > 0 && <span className="text-xs text-warn">{a.unresolved} conflicto(s) sin decisión</span>}
             {blocking.length > 0 && <span className="text-xs text-danger">Corrige los problemas bloqueantes</span>}
-            <Button variant="primary" size="lg" disabled={!canStart} onClick={() => setConfirmOpen(true)}>
-              Confirmar y copiar
+            <Button
+              variant="primary"
+              size="lg"
+              disabled={!canStart}
+              onClick={() => {
+                setMode(pf && !pf.copyPossible ? "move" : "copy");
+                setAck(false);
+                setMoveAck(false);
+                setConfirmOpen(true);
+              }}
+            >
+              Continuar
             </Button>
           </div>
         </div>
@@ -319,28 +332,117 @@ export default function VerifyStep() {
       <Modal
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        title="Confirmar copia"
+        title="¿Quieres copiar o mover los archivos?"
+        width="max-w-2xl"
         footer={
           <>
             <Button variant="ghost" onClick={() => setConfirmOpen(false)}>
               Cancelar
             </Button>
-            <Button variant="primary" loading={starting} disabled={!!adobeWarning && !ack} onClick={start}>
-              Iniciar copia
+            <Button
+              variant={mode === "move" ? "danger" : "primary"}
+              loading={starting}
+              disabled={(!!adobeWarning && !ack) || (mode === "move" && !moveAck) || (mode === "copy" && pf?.copyPossible === false)}
+              onClick={start}
+            >
+              {mode === "move" ? "Mover archivos" : "Copiar archivos"}
             </Button>
           </>
         }
       >
-        <div className="space-y-3 text-[13px]">
+        <div className="space-y-4 text-[13px]">
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={() => pf?.copyPossible !== false && setMode("copy")}
+              disabled={pf?.copyPossible === false}
+              className={cx(
+                "rounded-xl border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45",
+                mode === "copy" ? "border-accent/60 bg-accent/[0.07]" : "border-line hover:border-faint",
+              )}
+            >
+              <div className="flex items-center gap-2 font-medium">
+                <Copy className="h-4 w-4 text-accent" /> Copiar <Badge tone="ok">Recomendado</Badge>
+              </div>
+              <p className="mt-1.5 text-xs text-muted">
+                Los originales se quedan exactamente donde están. Necesita <b className="text-fg">{formatSize(pf?.requiredBytes)}</b> libres en el destino.
+              </p>
+              {pf?.copyPossible === false && <p className="mt-1.5 text-xs text-danger">No hay espacio suficiente para copiar.</p>}
+            </button>
+            <button
+              onClick={() => setMode("move")}
+              className={cx("rounded-xl border p-4 text-left transition-colors", mode === "move" ? "border-warn/60 bg-warn/[0.07]" : "border-line hover:border-faint")}
+            >
+              <div className="flex items-center gap-2 font-medium">
+                <MoveRight className="h-4 w-4 text-warn" /> Mover
+              </div>
+              <p className="mt-1.5 text-xs text-muted">
+                Los archivos salen de su ubicación original. Necesita{" "}
+                <b className="text-fg">{pf && pf.requiredBytesMove === 0 ? "0 B (mismo disco)" : formatSize(pf?.requiredBytesMove)}</b> libres.
+              </p>
+            </button>
+          </div>
+
           <p>
-            Se copiarán <b>{formatNumber(pf?.filesToCopy ?? 0)}</b> archivos (<b>{formatSize(pf?.requiredBytes)}</b>) a:
+            <b>{formatNumber(pf?.filesToCopy ?? 0)}</b> archivos (<b>{formatSize(pf?.requiredBytes)}</b>) hacia:
           </p>
           <PathText path={destRoot} className="!text-fg" />
-          <ul className="list-disc space-y-1 pl-5 text-xs text-muted">
-            <li>Los originales no se moverán, renombrarán, modificarán ni eliminarán.</li>
-            <li>Cada archivo se escribe como temporal, se verifica {settings.copy.verify === "full" ? "con SHA-256" : "por tamaño"} y luego se renombra sin sobrescribir.</li>
-            <li>Puedes pausar o cancelar; la operación se puede reanudar sin repetir archivos verificados.</li>
-          </ul>
+
+          {mode === "copy" ? (
+            <ul className="list-disc space-y-1 pl-5 text-xs text-muted">
+              <li>Los originales no se moverán, renombrarán, modificarán ni eliminarán.</li>
+              <li>Cada archivo se escribe como temporal, se verifica {settings.copy.verify === "full" ? "con SHA-256" : "por tamaño"} y luego se renombra sin sobrescribir.</li>
+              <li>Puedes pausar o cancelar; la operación se puede reanudar sin repetir archivos verificados.</li>
+            </ul>
+          ) : (
+            <div className="space-y-3">
+              <ul className="list-disc space-y-1 pl-5 text-xs text-muted">
+                <li>
+                  <b className="text-fg">Mismo disco:</b> el archivo se mueve al instante, sin reescribirlo ni ocupar espacio extra.
+                </li>
+                <li>
+                  <b className="text-fg">Otro disco:</b> se copia, se verifica con SHA-256 y <b className="text-fg">solo entonces</b> se retira el original. Si algo
+                  falla, el original se queda donde estaba.
+                </li>
+                <li>Los archivos excluidos u omitidos (cachés, autosaves, conflictos) no se tocan y permanecen en el origen.</li>
+                <li>Las carpetas que queden vacías en el origen se eliminan; la carpeta que seleccionaste se conserva.</li>
+              </ul>
+              <div>
+                <div className="mb-1.5 text-xs font-medium text-muted">Si el destino está en otro disco, los originales verificados…</div>
+                <div className="flex gap-2">
+                  {(
+                    [
+                      ["trash", "Van a la Papelera (recuperable)"],
+                      ["delete", "Se eliminan definitivamente"],
+                    ] as const
+                  ).map(([v, label]) => (
+                    <button
+                      key={v}
+                      onClick={() => setRemoval(v)}
+                      className={cx(
+                        "h-8 rounded-lg border px-3 text-xs",
+                        removal === v ? (v === "delete" ? "border-danger/60 bg-danger/10" : "border-accent/60 bg-accent/10") : "border-line text-muted hover:text-fg",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {plan.summary.adobeProjects > 0 && (
+                <div className="flex gap-2 rounded-lg border border-danger/30 bg-danger/[0.06] p-3 text-xs">
+                  <AlertOctagon className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
+                  <span>
+                    Hay <b>{plan.summary.adobeProjects}</b> proyecto(s) de After Effects / Premiere Pro. Al mover, también el proyecto <b>original</b> perderá la
+                    ubicación de sus medios y habrá que revincularlos. Si necesitas abrirlo sin revincular, elige <b>Copiar</b>.
+                  </span>
+                </div>
+              )}
+              <label className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/[0.06] p-3 text-xs">
+                <Checkbox checked={moveAck} onChange={setMoveAck} />
+                <span>Entiendo que los archivos dejarán de estar en su ubicación original.</span>
+              </label>
+            </div>
+          )}
           {adobeWarning && (
             <label className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/[0.06] p-3 text-xs">
               <Checkbox checked={ack} onChange={setAck} />

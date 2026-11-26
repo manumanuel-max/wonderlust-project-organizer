@@ -161,10 +161,10 @@ try {
   await sel.click();
   await (await sel.findElement(By.css("option[value='keepBoth']"))).click();
   await sleep(500);
-  await click("Confirmar y copiar");
-  await waitText("Confirmar copia");
+  await click("Continuar");
+  await waitText("¿Quieres copiar o mover los archivos?");
   await (await driver.findElement(By.xpath(`//label[contains(., 'backup organizado de archivos')]//input[@type='checkbox']`))).click();
-  await click("Iniciar copia");
+  await click("Copiar archivos");
   await waitText("Archivos en curso", 20000);
   // Esperar a que haya algunos archivos verificados y cerrar la aplicación de golpe.
   await sleep(2500);

@@ -8,8 +8,12 @@ import { CATEGORIES } from "../lib/format";
 import { applyTheme, useStore } from "../lib/store";
 import type { AppSettings, Category, Location } from "../lib/types";
 import { ExclusionsPanel } from "./organize/ReviewStep";
+import { UpdatePanel } from "../components/UpdatePanel";
+import { IntegrationPanel } from "../components/IntegrationPanel";
 
 const SECTIONS = [
+  ["actualizaciones", "Actualizaciones"],
+  ["integracion", "Menú contextual y avisos"],
   ["apariencia", "Tema visual"],
   ["nomenclatura", "Nomenclatura"],
   ["reglas", "Reglas de clasificación"],
@@ -57,7 +61,9 @@ export default function SettingsPage() {
     api.listLocations().then((l) => setDrives(l.filter((x) => x.kind === "gdrive"))).catch(() => {});
   }, []);
 
-  const dirty = useMemo(() => JSON.stringify(d) !== JSON.stringify(stored), [d, stored]);
+  // El menú contextual se aplica al instante (no forma parte de "Guardar cambios").
+  const comparable = (x: AppSettings) => JSON.stringify({ ...x, contextMenu: undefined });
+  const dirty = useMemo(() => comparable(d) !== comparable(stored), [d, stored]);
   const up = <K extends keyof AppSettings>(k: K, v: AppSettings[K]) => setD({ ...d, [k]: v });
 
   const saveAll = async () => {
@@ -114,6 +120,22 @@ export default function SettingsPage() {
           ))}
         </nav>
         <div className="min-w-0 flex-1 space-y-5 overflow-auto pb-10">
+          <Section id="actualizaciones" title="Actualizaciones">
+            <UpdatePanel />
+          </Section>
+
+          <Section id="integracion" title="Menú contextual y avisos">
+            <IntegrationPanel
+              finishSound={d.finishSound ?? true}
+              onFinishSound={(v) => up("finishSound", v)}
+              onContextMenuChanged={(v) => {
+                const cur = useStore.getState().settings!;
+                setSettings({ ...cur, contextMenu: v });
+                setD((x) => ({ ...x, contextMenu: v }));
+              }}
+            />
+          </Section>
+
           <Section id="apariencia" title="Tema visual">
             <div className="flex gap-2">
               {(["dark", "light", "system"] as const).map((t) => (
@@ -274,6 +296,16 @@ export default function SettingsPage() {
                 />
               </Field>
               <Toggle checked={d.copy.preserveMtime} onChange={(v) => up("copy", { ...d.copy, preserveMtime: v })} label="Conservar la fecha de modificación en las copias" />
+              <Field label="Al mover entre discos distintos, los originales verificados…">
+                <Select
+                  value={d.moveRemoval ?? "trash"}
+                  onChange={(v) => up("moveRemoval", v)}
+                  options={[
+                    { value: "trash", label: "Van a la Papelera (recomendado, recuperable)" },
+                    { value: "delete", label: "Se eliminan definitivamente" },
+                  ]}
+                />
+              </Field>
               <Toggle
                 checked={d.writeReportToDestination}
                 onChange={(v) => up("writeReportToDestination", v)}

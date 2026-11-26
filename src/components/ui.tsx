@@ -17,7 +17,7 @@ export const Button = forwardRef<
     "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors duration-150 disabled:opacity-40 disabled:pointer-events-none whitespace-nowrap";
   const sizes = { sm: "h-7 px-2.5 text-xs", md: "h-9 px-3.5 text-[13px]", lg: "h-11 px-5 text-sm" };
   const variants: Record<Variant, string> = {
-    primary: "bg-accent text-white hover:brightness-110 shadow-[0_1px_0_rgb(255_255_255/0.15)_inset]",
+    primary: "bg-accent text-onaccent hover:brightness-110 shadow-[0_1px_0_rgb(255_255_255/0.15)_inset]",
     secondary: "bg-raised text-fg border border-line hover:border-faint",
     ghost: "text-muted hover:text-fg hover:bg-raised",
     subtle: "bg-fg/5 text-fg hover:bg-fg/10",

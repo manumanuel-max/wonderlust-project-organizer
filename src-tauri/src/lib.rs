@@ -1,7 +1,9 @@
 mod commands;
+mod integration;
 mod jobs;
 mod locations;
 mod state;
+mod updater;
 
 use state::AppState;
 use tauri::Manager;
@@ -9,8 +11,16 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Una sola instancia: si la app ya está abierta, las carpetas del clic derecho llegan a ella.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            integration::deliver(app, integration::paths_from_args(argv));
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .manage(updater::UpdateState::default())
+        .manage(integration::LaunchPaths(std::sync::Mutex::new(integration::paths_from_args(std::env::args()))))
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
             let data_dir = app.path().app_data_dir()?;
@@ -28,6 +38,7 @@ pub fn run() {
             if changed {
                 let _ = wpo_core::settings::save_json(&hp, &h);
             }
+            integration::sync_on_startup(&state);
             app.manage(state);
             Ok(())
         })
@@ -70,7 +81,26 @@ pub fn run() {
             jobs::export_report,
             commands::history_list,
             commands::history_delete,
+            updater::update_config,
+            updater::check_update,
+            updater::install_update,
+            updater::restart_app,
+            integration::take_launch_paths,
+            integration::context_menu_status,
+            integration::set_context_menu,
         ])
-        .run(tauri::generate_context!())
-        .expect("error al iniciar Wonderlust Project Organizer");
+        .build(tauri::generate_context!())
+        .expect("error al iniciar Wonderlust Project Organizer")
+        .run(|_app, _event| {
+            // macOS: carpetas recibidas desde la Acción rápida de Finder o arrastradas al Dock.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
+                let paths = urls
+                    .into_iter()
+                    .filter_map(|u| u.to_file_path().ok())
+                    .map(|p| p.display().to_string())
+                    .collect();
+                integration::deliver(_app, paths);
+            }
+        });
 }

@@ -43,6 +43,9 @@ interface AppStore {
   settings: AppSettings | null;
   toasts: Toast[];
   organize: OrganizeState;
+  /** Pedir una búsqueda de actualizaciones al abrir Configuración. */
+  checkUpdatesRequested: boolean;
+  requestUpdateCheck: () => void;
   /** Reporte abierto desde el historial. */
   reportJobId: string | null;
   setRoute: (r: Route) => void;
@@ -53,6 +56,8 @@ interface AppStore {
   patchOrganize: (p: Partial<OrganizeState>) => void;
   resetOrganize: () => void;
   openReport: (jobId: string | null) => void;
+  /** Carpetas recibidas desde el menú contextual del sistema. */
+  openWithPaths: (paths: string[]) => Promise<void>;
 }
 
 let toastId = 1;
@@ -63,6 +68,8 @@ export const useStore = create<AppStore>((set, get) => ({
   toasts: [],
   organize: emptyOrganize(),
   reportJobId: null,
+  checkUpdatesRequested: false,
+  requestUpdateCheck: () => set({ checkUpdatesRequested: true, route: "settings" }),
   setRoute: (route) => set({ route }),
   loadSettings: async () => {
     const s = await api.getSettings();
@@ -84,6 +91,25 @@ export const useStore = create<AppStore>((set, get) => ({
     set({ organize: emptyOrganize(get().settings?.defaultMode ?? "organize") });
   },
   openReport: (jobId) => set({ reportJobId: jobId }),
+  openWithPaths: async (paths) => {
+    if (!paths.length) return;
+    const o = get().organize;
+    if (o.jobId && o.step === "copy") {
+      get().toast("info", "Hay una operación en curso. Cuando termine, vuelve a usar «Organizar con Wonderlust».");
+      set({ route: "organize" });
+      return;
+    }
+    api.closeSession().catch(() => {});
+    const base = emptyOrganize(get().settings?.defaultMode ?? "organize");
+    const recent = get().settings?.recentDestinations[0] ?? "";
+    let patch: Partial<OrganizeState> = { sources: Array.from(new Set(paths)), destParent: recent };
+    if (paths.length === 1) {
+      const name = paths[0].split(/[\\/]/).filter(Boolean).pop() ?? "";
+      const parsed = await api.parseProjectName(name).catch(() => null);
+      if (parsed) patch = { ...patch, date: parsed.date, client: parsed.client, project: parsed.project };
+    }
+    set({ organize: { ...base, ...patch }, route: "organize", reportJobId: null });
+  },
 }));
 
 /** Aplica el tema visual al documento. */

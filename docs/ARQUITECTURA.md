@@ -108,6 +108,11 @@ libre), `filetime` (conservar fecha de modificación en la copia), `chrono`, `th
   `renamex_np(RENAME_EXCL)` en macOS, `MoveFileExW` sin `REPLACE_EXISTING` en Windows).
 * Si el destino final ya existe, la operación falla; nunca se sobrescribe.
 * Se comprueba que el origen no cambió (tamaño/fecha) durante la copia.
+* **Modo mover (opcional, elegido al confirmar):** en el mismo volumen se usa el renombrado
+  sin sobrescritura (atómico, sin reescribir datos); entre volúmenes se copia y verifica como
+  arriba y **después** se retira el original (Papelera por defecto o eliminación definitiva),
+  comprobando antes que no cambió. Un fallo al retirar deja el original en su sitio y se reporta.
+  Al terminar se eliminan solo las carpetas que quedaron vacías dentro del origen.
 * Cada resultado se registra en un diario JSONL; tras una interrupción se reanuda sin repetir
   archivos ya verificados.
 * El reporte solo declara éxito si **todos** los archivos programados están copiados y

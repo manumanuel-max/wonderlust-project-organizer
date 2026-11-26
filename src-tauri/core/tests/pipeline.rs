@@ -94,6 +94,7 @@ fn prepare(src: &Path, dest_root: &Path, journal_dir: &Path, opts: PlanOptions, 
             excluded: ops.excluded,
             settings: CopySettings { concurrency: 3, buffer_kb: 64, verify, ..Default::default() },
             warnings: vec![],
+            transfer: Default::default(),
         },
         journal: journal_dir.join("journal.jsonl"),
     }
@@ -340,6 +341,7 @@ fn conflicts_with_existing_destination_and_keep_both() {
         excluded: ops.excluded,
         settings: CopySettings::default(),
         warnings: vec![],
+        transfer: Default::default(),
     };
     let out = run_job(&manifest, &d.path().join("j.jsonl"), &JobControl::default(), None, |_| {}).unwrap();
     let r = build_report(&manifest, &out, "x".into());
@@ -415,6 +417,7 @@ fn out_of_space_aborts_and_is_reported() {
         excluded: ops.excluded,
         settings: CopySettings { concurrency: 1, ..Default::default() },
         warnings: vec![],
+        transfer: Default::default(),
     };
     let out = run_job(&manifest, &d.path().join("j.jsonl"), &JobControl::default(), None, |_| {}).unwrap();
     let r = build_report(&manifest, &out, "x".into());
@@ -458,6 +461,7 @@ fn unreadable_source_files_fail_without_affecting_others() {
         excluded: ops.excluded,
         settings: CopySettings::default(),
         warnings: vec![],
+        transfer: Default::default(),
     };
     let out = run_job(&manifest, &d.path().join("j.jsonl"), &JobControl::default(), None, |_| {}).unwrap();
     let r = build_report(&manifest, &out, "x".into());
@@ -472,4 +476,135 @@ fn unreadable_source_files_fail_without_affecting_others() {
 extern "C" {
     #[link_name = "geteuid"]
     fn libc_geteuid() -> u32;
+}
+
+// ---------------------------------------------------------------------------
+// Modo mover
+// ---------------------------------------------------------------------------
+
+use wpo_core::copy::{remove_original, RemovalMode, TransferMode, TransferOptions};
+
+fn move_run(src: &Path, dest: &Path, journal: &Path, removal: RemovalMode) -> (JobManifest, wpo_core::copy::JobOutcome) {
+    let mut run = prepare(src, dest, journal.parent().unwrap(), PlanOptions::default(), VerifyMode::Full);
+    run.manifest.transfer = TransferOptions { mode: TransferMode::Move, removal };
+    let out = run_job(&run.manifest, &run.journal, &JobControl::default(), None, |_| {}).unwrap();
+    (run.manifest, out)
+}
+
+#[test]
+fn move_within_same_disk_renames_and_prunes_empty_folders() {
+    let d = tempfile::tempdir().unwrap();
+    let src = d.path().join("Proyecto viejo");
+    sample_project(&src);
+    let wav = std::fs::read(src.join("Audio/Música/Tema principal.wav")).unwrap();
+    let dest = d.path().join("Organizado");
+    let (m, out) = move_run(&src, &dest, &d.path().join("j.jsonl"), RemovalMode::Trash);
+    let r = build_report(&m, &out, "x".into());
+    assert!(r.success, "{:#?}", r.entries);
+    assert_eq!(r.totals.moved_same_disk, r.totals.copied);
+    assert_eq!(r.totals.originals_trashed + r.totals.originals_deleted, 0);
+    // Movido: ya no está en el origen y el contenido es idéntico en el destino.
+    assert!(!src.join("Audio/Música/Tema principal.wav").exists());
+    assert_eq!(std::fs::read(dest.join("3. audio/Música/Tema principal.wav")).unwrap(), wav);
+    assert!(dest.join("1. imagen/Explosion/Explosion_0001.png").exists());
+    // Los excluidos se quedan en el origen, con su carpeta.
+    assert!(src.join(".DS_Store").exists());
+    assert!(src.join("Adobe After Effects Auto-Save/Proyecto auto-save 1.aep").exists());
+    // Carpetas vaciadas se retiran; la carpeta seleccionada se conserva.
+    assert!(!src.join("Audio").exists());
+    assert!(!src.join("Comp").exists());
+    assert!(src.is_dir());
+    assert!(out.pruned_dirs > 0);
+}
+
+#[test]
+fn move_skipped_and_conflicting_files_stay_in_origin() {
+    let d = tempfile::tempdir().unwrap();
+    let src = d.path().join("src");
+    write(&src.join("a.wav"), b"nuevo");
+    write(&src.join("b.wav"), b"otro");
+    let dest = d.path().join("P");
+    write(&dest.join("3. audio/a.wav"), b"ya estaba");
+    let (m, out) = move_run(&src, &dest, &d.path().join("j.jsonl"), RemovalMode::Delete);
+    let r = build_report(&m, &out, "x".into());
+    assert_eq!(r.totals.skipped, 0);
+    // prepare() resuelve el conflicto con "conservar ambos".
+    assert_eq!(std::fs::read(dest.join("3. audio/a.wav")).unwrap(), b"ya estaba");
+    assert_eq!(std::fs::read(dest.join("3. audio/a_copia1.wav")).unwrap(), b"nuevo");
+    assert!(!src.join("a.wav").exists());
+}
+
+#[test]
+fn remove_original_never_removes_a_changed_file_and_trash_works() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("clip.mov");
+    std::fs::write(&f, b"12345").unwrap();
+    let op = wpo_core::duplicates::Operation {
+        idx: 0,
+        item_id: 0,
+        src: f.clone(),
+        rel_src: "clip.mov".into(),
+        dest_rel: "2. video/clip.mov".into(),
+        size: 3, // distinto del real: el original "cambió"
+        mtime: 0,
+        category: wpo_core::Category::Video,
+        action: OpAction::Copy,
+        renamed: false,
+    };
+    assert!(matches!(remove_original(&op, RemovalMode::Delete), wpo_core::copy::OriginState::RemovalFailed { .. }));
+    assert!(f.exists());
+    let op = wpo_core::duplicates::Operation { size: 5, ..op };
+    match remove_original(&op, RemovalMode::Trash) {
+        wpo_core::copy::OriginState::Trashed => assert!(!f.exists()),
+        wpo_core::copy::OriginState::RemovalFailed { error } => {
+            // Sin Papelera disponible (p. ej. sistemas sin escritorio): el original se conserva.
+            eprintln!("Papelera no disponible: {error}");
+            assert!(f.exists());
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn move_resumes_after_crash_between_rename_and_journal() {
+    let d = tempfile::tempdir().unwrap();
+    let src = d.path().join("src");
+    write(&src.join("a.wav"), &pseudo_random(4000, 1));
+    write(&src.join("b.wav"), &pseudo_random(4000, 2));
+    let dest = d.path().join("P");
+    let mut run = prepare(&src, &dest, d.path(), PlanOptions::default(), VerifyMode::Full);
+    run.manifest.transfer = TransferOptions { mode: TransferMode::Move, removal: RemovalMode::Delete };
+    // Simular: a.wav ya se movió pero el diario no lo registró.
+    std::fs::create_dir_all(dest.join("3. audio")).unwrap();
+    std::fs::rename(src.join("a.wav"), dest.join("3. audio/a.wav")).unwrap();
+    let out = run_job(&run.manifest, &run.journal, &JobControl::default(), None, |_| {}).unwrap();
+    let r = build_report(&run.manifest, &out, "x".into());
+    assert!(r.success, "{:#?}", r.entries);
+    assert!(dest.join("3. audio/a.wav").exists() && dest.join("3. audio/b.wav").exists());
+    assert!(!src.join("b.wav").exists());
+}
+
+/// Mover entre discos distintos: copia + verificación + eliminación del original.
+/// Requiere WPO_SMALL_FS_DIR (otro sistema de archivos).
+#[test]
+fn move_across_disks_copies_verifies_then_removes() {
+    let Ok(small) = std::env::var("WPO_SMALL_FS_DIR") else {
+        eprintln!("WPO_SMALL_FS_DIR no definido: prueba omitida");
+        return;
+    };
+    let src = PathBuf::from(small).join(format!("mv{}", std::process::id()));
+    write(&src.join("Audio/tema.wav"), &pseudo_random(50_000, 7));
+    write(&src.join("clip.mov"), &pseudo_random(80_000, 8));
+    let wav = std::fs::read(src.join("Audio/tema.wav")).unwrap();
+    let d = tempfile::tempdir().unwrap();
+    let dest = d.path().join("P");
+    let (m, out) = move_run(&src, &dest, &d.path().join("j.jsonl"), RemovalMode::Delete);
+    let r = build_report(&m, &out, "x".into());
+    assert!(r.success, "{:#?}", r.entries);
+    assert_eq!(r.totals.originals_deleted, 2);
+    assert_eq!(r.totals.moved_same_disk, 0);
+    assert_eq!(r.totals.verified, 2);
+    assert_eq!(std::fs::read(dest.join("3. audio/tema.wav")).unwrap(), wav);
+    assert!(!src.join("Audio/tema.wav").exists() && !src.join("Audio").exists());
+    let _ = std::fs::remove_dir_all(&src);
 }

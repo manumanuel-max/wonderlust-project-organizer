@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Wonderlust Project Organizer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.wonderlust.projectorganizer",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -22,7 +22,7 @@
         "center": true,
         "dragDropEnabled": true,
         "theme": "Dark",
-        "backgroundColor": "#0e0f12"
+        "backgroundColor": "#16161B"
       }
     ],
     "security": {
@@ -31,7 +31,14 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi", "app", "dmg", "deb", "appimage"],
+    "targets": [
+      "nsis",
+      "msi",
+      "app",
+      "dmg",
+      "deb",
+      "appimage"
+    ],
     "publisher": "Wonderlust",
     "copyright": "© Wonderlust",
     "category": "Productivity",
@@ -46,16 +53,30 @@
     ],
     "windows": {
       "nsis": {
-        "languages": ["Spanish"],
+        "languages": [
+          "Spanish"
+        ],
         "displayLanguageSelector": false,
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "./windows/hooks.nsh"
       },
       "wix": {
         "language": "es-ES"
       }
     },
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "11.0",
+      "infoPlist": "./macos/Info.plist"
+    },
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI1QTVBMzEwOTU4ODZFQTkKUldTcGJvaVZFS09sSlh1SHpIejQ1dXljeStmdy9mejRseTJGMkdvaGIrYklxb05IQXVGVmNMcDIK",
+      "endpoints": [],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

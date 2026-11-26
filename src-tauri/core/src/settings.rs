@@ -51,6 +51,12 @@ pub struct AppSettings {
     pub recent_destinations: Vec<String>,
     /// Guardar reporte y mapa de rutas en `<proyecto>/_wonderlust_reportes/`.
     pub write_report_to_destination: bool,
+    /// Al mover entre discos: qué hacer con el original verificado.
+    pub move_removal: crate::copy::RemovalMode,
+    /// Opción "Organizar con Wonderlust" en el menú contextual de Finder / Explorador.
+    pub context_menu: bool,
+    /// Sonido al terminar una copia o un movimiento.
+    pub finish_sound: bool,
 }
 
 impl Default for AppSettings {
@@ -70,6 +76,9 @@ impl Default for AppSettings {
             frequent_paths: Vec::new(),
             recent_destinations: Vec::new(),
             write_report_to_destination: true,
+            move_removal: crate::copy::RemovalMode::Trash,
+            context_menu: true,
+            finish_sound: true,
         }
     }
 }

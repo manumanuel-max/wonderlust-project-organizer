@@ -24,7 +24,7 @@ export default function Organize() {
     <div className="flex h-full flex-col">
       <PageHeader
         title="Organizar proyecto"
-        subtitle="Clasifica y copia un proyecto existente en la estructura estandarizada, sin tocar los originales."
+        subtitle="Clasifica un proyecto existente en la estructura estandarizada, copiando o moviendo los archivos."
         right={
           (step === "report" || step === "sources" || step === "review" || step === "verify") && (
             <Button variant="ghost" size="sm" onClick={reset}>
@@ -45,7 +45,7 @@ export default function Organize() {
               <span
                 className={cx(
                   "flex h-5 w-5 items-center justify-center rounded-full text-2xs font-semibold",
-                  i < idx ? "bg-ok/20 text-ok" : i === idx ? "bg-accent text-white" : "bg-line text-faint",
+                  i < idx ? "bg-ok/20 text-ok" : i === idx ? "bg-accent text-onaccent" : "bg-line text-faint",
                 )}
               >
                 {i < idx ? <Check className="h-3 w-3" /> : i + 1}

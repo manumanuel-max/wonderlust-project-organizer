@@ -1,7 +1,8 @@
-import { CheckCircle2, FolderPlus, FolderTree, History, Home, Info, Settings, X, XCircle } from "lucide-react";
+import { CheckCircle2, FolderPlus, FolderTree, History, Home, Info, RefreshCw, Settings, X, XCircle } from "lucide-react";
 import type { ReactNode } from "react";
 import { useStore, type Route } from "../lib/store";
 import { cx } from "./ui";
+import logoSvg from "../assets/logo-horizontal.svg?raw";
 
 const NAV: { route: Route; label: string; icon: ReactNode }[] = [
   { route: "home", label: "Inicio", icon: <Home className="h-4 w-4" /> },
@@ -11,21 +12,9 @@ const NAV: { route: Route; label: string; icon: ReactNode }[] = [
   { route: "settings", label: "Configuración", icon: <Settings className="h-4 w-4" /> },
 ];
 
+/** Logotipo horizontal de Wonderlust (amarillo en tema oscuro, tinta en tema claro). */
 export function Logo({ className }: { className?: string }) {
-  const bars = [
-    { x: 0, h: 18, c: "rgb(var(--cat-imagen))" },
-    { x: 5, h: 9, c: "rgb(var(--cat-video))" },
-    { x: 10, h: 16, c: "rgb(var(--cat-audio))" },
-    { x: 15, h: 9, c: "rgb(var(--cat-editable))" },
-    { x: 20, h: 18, c: "rgb(var(--cat-archivos))" },
-  ];
-  return (
-    <svg viewBox="0 0 24 20" className={className} aria-hidden>
-      {bars.map((b) => (
-        <rect key={b.x} x={b.x} y={20 - b.h} width={4} height={b.h} rx={2} fill={b.c} />
-      ))}
-    </svg>
-  );
+  return <span className={cx("block text-brand [&>svg]:h-full [&>svg]:w-auto", className)} dangerouslySetInnerHTML={{ __html: logoSvg }} />;
 }
 
 export function Sidebar({ busy }: { busy: boolean }) {
@@ -34,12 +23,9 @@ export function Sidebar({ busy }: { busy: boolean }) {
   const step = useStore((s) => s.organize.step);
   return (
     <aside className="flex w-[216px] shrink-0 flex-col border-r border-line bg-panel/60">
-      <div className="flex items-center gap-2.5 px-4 pb-5 pt-5">
-        <Logo className="h-5 w-6" />
-        <div className="leading-tight">
-          <div className="text-[13px] font-semibold tracking-tight">Wonderlust</div>
-          <div className="text-2xs text-faint">Project Organizer</div>
-        </div>
+      <div className="px-4 pb-5 pt-5">
+        <Logo className="h-9" />
+        <div className="mt-1.5 pl-0.5 text-2xs uppercase tracking-[0.18em] text-faint">Project Organizer</div>
       </div>
       <nav className="flex flex-col gap-0.5 px-2">
         {NAV.map((n) => (
@@ -59,8 +45,14 @@ export function Sidebar({ busy }: { busy: boolean }) {
           </button>
         ))}
       </nav>
-      <div className="mt-auto px-4 pb-4 text-2xs leading-relaxed text-faint">
-        Solo copia: los originales nunca se mueven, renombran ni eliminan.
+      <button
+        onClick={() => useStore.getState().requestUpdateCheck()}
+        className="mx-2 mt-auto mb-2 flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-muted hover:bg-raised/60 hover:text-fg"
+      >
+        <RefreshCw className="h-3.5 w-3.5" /> Buscar actualizaciones
+      </button>
+      <div className="px-4 pb-4 text-2xs leading-relaxed text-faint">
+        Por defecto solo copia. Si eliges mover, cada original se retira solo después de verificar su copia.
       </div>
     </aside>
   );

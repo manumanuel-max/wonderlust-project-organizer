@@ -24,7 +24,7 @@ function ActionCard({ icon, title, description, onClick, accent }: { icon: React
         accent ? "border-accent/30 bg-gradient-to-br from-accent/[0.12] to-transparent hover:border-accent/60" : "border-line bg-panel hover:border-faint",
       )}
     >
-      <div className={cx("mb-auto flex h-11 w-11 items-center justify-center rounded-xl", accent ? "bg-accent text-white" : "bg-raised text-fg")}>{icon}</div>
+      <div className={cx("mb-auto flex h-11 w-11 items-center justify-center rounded-xl", accent ? "bg-accent text-onaccent" : "bg-raised text-fg")}>{icon}</div>
       <div className="mt-8">
         <div className="flex items-center gap-2 text-lg font-semibold tracking-tight">
           {title}

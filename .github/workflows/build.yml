@@ -7,6 +7,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  # Canal de "Buscar actualizaciones": latest.json de la última Release de este repositorio (público).
+  WPO_UPDATE_URL: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+
 jobs:
   pruebas:
     name: Pruebas (${{ matrix.os }})
@@ -35,6 +39,8 @@ jobs:
 
   compilar:
     name: Instalador ${{ matrix.name }}
+    # Compilaciones de prueba (sin publicar). Las versiones oficiales salen del trabajo "publicar".
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
     # Se compila en paralelo con las pruebas para obtener los instaladores aunque una prueba falle;
     # revisa siempre que el trabajo "Pruebas" esté en verde antes de distribuir.
     strategy:
@@ -103,3 +109,62 @@ jobs:
             src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage
+
+  publicar:
+    name: Publicar versión ${{ github.ref_name }} (${{ matrix.name }})
+    # Se ejecuta al crear una etiqueta vX.Y.Z. Publica una Release con instaladores firmados
+    # para el actualizador y el archivo latest.json que consulta "Buscar actualizaciones".
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            args: --bundles nsis,msi
+          - name: macOS
+            os: macos-latest
+            args: --target universal-apple-darwin --bundles app,dmg
+          - name: Linux
+            os: ubuntu-22.04
+            args: --bundles deb,appimage
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencias de Linux
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Wonderlust Project Organizer ${{ github.ref_name }}
+          releaseBody: Descarga el instalador de tu sistema en «Assets». Si ya tienes la app, usa «Buscar actualizaciones».
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json

@@ -57,7 +57,16 @@ archivos que ya existen en el destino.
 * **Conflictos de nombre**: elige *Omitir*, *Conservar ambos* (la copia nueva recibe `_copiaN`) o
   *Renombrar la copia…*. Con *Aplicar a conflictos equivalentes* la decisión se extiende a los del
   mismo tipo. **Nunca se sobrescribe un archivo existente.**
-* **Confirmar y copiar** abre un resumen final. Si hay proyectos de Adobe en modo organizar, debes
+* **Continuar** abre la ventana **¿Quieres copiar o mover los archivos?**
+  * **Copiar (recomendado):** los originales quedan intactos. Necesita espacio libre para todo.
+  * **Mover:** los archivos salen de su ubicación original. En el **mismo disco** es instantáneo y
+    no ocupa espacio extra. Hacia **otro disco**, cada archivo se copia, se verifica con SHA-256 y
+    solo entonces el original va a la **Papelera** (o se elimina, si lo eliges). Los archivos
+    excluidos u omitidos se quedan en el origen, y se eliminan las carpetas que queden vacías
+    (no la carpeta que seleccionaste). Hay que marcar *"Entiendo que los archivos dejarán de estar
+    en su ubicación original"*.
+  * Si no hay espacio para copiar pero sí para mover (mismo disco), solo se ofrece mover.
+* La ventana muestra un resumen final. Si hay proyectos de Adobe en modo organizar, debes
   confirmar que entiendes que se trata de un **backup organizado de archivos**, no de un
   proyecto recopilado listo para abrir.
 
@@ -86,7 +95,9 @@ puedes reanudar desde **Historial**.
   → Collect Files** (After Effects) o **File → Project Manager** (Premiere Pro), o el modo
   **Backup conservando jerarquía**.
 * El **mapa de rutas** del reporte indica dónde quedó cada archivo para revincular manualmente.
-* La aplicación **nunca** modifica archivos `.aep`, `.aepx` o `.prproj`.
+* La aplicación **nunca** modifica el contenido de archivos `.aep`, `.aepx` o `.prproj`.
+* **Mover** un proyecto con archivos de Adobe rompe también los vínculos del proyecto original.
+  Si necesitas abrirlo sin revincular, elige **Copiar**.
 
 ## 5. Recomendaciones
 

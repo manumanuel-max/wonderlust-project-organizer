@@ -96,4 +96,5 @@ export const KIND_LABELS: Record<string, string> = {
   structure: "Crear estructura",
   organize: "Organizar proyecto",
   backup: "Backup con jerarquía",
+  move: "Mover proyecto",
 };

@@ -47,6 +47,51 @@ impl Default for CopySettings {
     }
 }
 
+/// Copiar (los originales quedan intactos) o mover (los originales se retiran
+/// solo después de verificar la copia).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TransferMode {
+    #[default]
+    Copy,
+    Move,
+}
+
+/// Qué hacer con el original al mover entre discos distintos, tras verificar la copia.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum RemovalMode {
+    /// Enviar a la Papelera / Papelera de reciclaje (recuperable).
+    #[default]
+    Trash,
+    /// Eliminar definitivamente.
+    Delete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TransferOptions {
+    pub mode: TransferMode,
+    pub removal: RemovalMode,
+}
+
+/// Estado del archivo original tras la operación.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum OriginState {
+    /// El original sigue en su sitio (modo copiar).
+    #[default]
+    Kept,
+    /// Movido dentro del mismo disco (renombrado atómico; el contenido no se reescribe).
+    Moved,
+    /// Copiado, verificado y el original enviado a la Papelera.
+    Trashed,
+    /// Copiado, verificado y el original eliminado.
+    Deleted,
+    /// Copiado y verificado, pero el original no se pudo retirar (sigue en su sitio).
+    RemovalFailed { error: String },
+}
+
 /// Descripción persistente de un trabajo (permite reanudar tras un cierre).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,13 +109,20 @@ pub struct JobManifest {
     pub settings: CopySettings,
     #[serde(default)]
     pub warnings: Vec<String>,
+    #[serde(default)]
+    pub transfer: TransferOptions,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "status", rename_all = "camelCase")]
 pub enum OpResult {
     Pending,
-    Done { sha256: String, verified: bool },
+    Done {
+        sha256: String,
+        verified: bool,
+        #[serde(default)]
+        origin: OriginState,
+    },
     Skipped { reason: String },
     Failed { error: String },
 }
@@ -180,6 +232,9 @@ pub struct JobOutcome {
     pub aborted_reason: Option<String>,
     pub duration_ms: u64,
     pub bytes_copied: u64,
+    /// Carpetas vacías retiradas del origen (solo al mover).
+    #[serde(default)]
+    pub pruned_dirs: usize,
 }
 
 enum CopyError {
@@ -310,7 +365,7 @@ fn copy_one(op: &Operation, dest_root: &Path, settings: &CopySettings, shared: &
 
     match result {
         Ok(hash) => match rename_no_clobber(&long_path(&tmp), &long_path(&dest)) {
-            Ok(()) => Ok(OpResult::Done { sha256: hash, verified: settings.verify == VerifyMode::Full }),
+            Ok(()) => Ok(OpResult::Done { sha256: hash, verified: settings.verify == VerifyMode::Full, origin: OriginState::Kept }),
             Err(e) => {
                 let _ = std::fs::remove_file(long_path(&tmp));
                 if e.kind() == io::ErrorKind::AlreadyExists {
@@ -336,7 +391,92 @@ fn reconcile_existing(op: &Operation, dest: &Path, cancel: &AtomicBool) -> Optio
     }
     let a = sha256_file(&op.src, cancel, |_| {}).ok()?;
     let b = sha256_file(dest, cancel, |_| {}).ok()?;
-    (a == b).then_some(OpResult::Done { sha256: a, verified: true })
+    (a == b).then_some(OpResult::Done { sha256: a, verified: true, origin: OriginState::Kept })
+}
+
+/// Retira el original tras una copia verificada. Antes comprueba que el
+/// original no cambió (mismo tamaño) desde que se copió.
+pub fn remove_original(op: &Operation, removal: RemovalMode) -> OriginState {
+    match std::fs::metadata(long_path(&op.src)) {
+        Ok(m) if m.len() == op.size => {}
+        Ok(_) => {
+            return OriginState::RemovalFailed { error: "El original cambió después de copiarse; no se retiró".into() }
+        }
+        Err(e) => return OriginState::RemovalFailed { error: e.to_string() },
+    }
+    match removal {
+        RemovalMode::Trash => match trash::delete(&op.src) {
+            Ok(()) => OriginState::Trashed,
+            Err(e) => OriginState::RemovalFailed { error: format!("No se pudo enviar a la Papelera: {e}") },
+        },
+        RemovalMode::Delete => match std::fs::remove_file(long_path(&op.src)) {
+            Ok(()) => OriginState::Deleted,
+            Err(e) => OriginState::RemovalFailed { error: e.to_string() },
+        },
+    }
+}
+
+/// Intenta mover en el mismo disco (renombrado sin sobrescritura).
+/// `Ok(None)` significa que no es posible (otro disco, permisos...) y hay que copiar.
+fn try_fast_move(op: &Operation, dest: &Path) -> Result<Option<OpResult>, CopyError> {
+    if std::fs::symlink_metadata(long_path(dest)).is_ok() {
+        return Err(CopyError::Fatal("El archivo de destino ya existe; no se sobrescribe".into()));
+    }
+    let parent = dest.parent().unwrap_or(dest);
+    std::fs::create_dir_all(long_path(parent)).map_err(|e| io_err("Crear carpeta de destino", e))?;
+    match std::fs::metadata(long_path(&op.src)) {
+        Ok(m) if m.len() == op.size => {}
+        Ok(_) => return Err(CopyError::Retryable("El archivo de origen cambió desde el análisis".into())),
+        Err(e) => return Err(io_err("Leer origen", e)),
+    }
+    match rename_no_clobber(&long_path(&op.src), &long_path(dest)) {
+        Ok(()) => {
+            let len = std::fs::metadata(long_path(dest)).map(|m| m.len()).unwrap_or(u64::MAX);
+            if len != op.size {
+                return Err(CopyError::Fatal("El tamaño tras mover no coincide".into()));
+            }
+            Ok(Some(OpResult::Done { sha256: String::new(), verified: true, origin: OriginState::Moved }))
+        }
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+            Err(CopyError::Fatal("El archivo de destino apareció durante la operación; no se sobrescribe".into()))
+        }
+        // Otro disco (EXDEV / ERROR_NOT_SAME_DEVICE) u otra limitación: copiar y verificar.
+        Err(_) => Ok(None),
+    }
+}
+
+/// Elimina carpetas que quedaron vacías dentro de los orígenes (de abajo arriba).
+/// Nunca elimina la carpeta seleccionada ni carpetas con contenido.
+pub fn prune_empty_dirs(sources: &[PathBuf]) -> usize {
+    fn walk(dir: &Path, removed: &mut usize) -> bool {
+        let Ok(rd) = std::fs::read_dir(dir) else { return false };
+        let mut empty = true;
+        for e in rd.flatten() {
+            let Ok(ft) = e.file_type() else {
+                empty = false;
+                continue;
+            };
+            if ft.is_dir() {
+                if walk(&e.path(), removed) {
+                    if std::fs::remove_dir(e.path()).is_ok() {
+                        *removed += 1;
+                    } else {
+                        empty = false;
+                    }
+                } else {
+                    empty = false;
+                }
+            } else {
+                empty = false;
+            }
+        }
+        empty
+    }
+    let mut removed = 0;
+    for s in sources.iter().filter(|s| s.is_dir()) {
+        walk(s, &mut removed);
+    }
+    removed
 }
 
 /// Ejecuta (o reanuda) un trabajo. `only` limita la ejecución a ciertos índices
@@ -451,8 +591,25 @@ pub fn run_job(
                 let n = next.fetch_add(1, Ordering::SeqCst);
                 let Some(op) = work.get(n) else { break };
                 let dest = join_rel(&manifest.dest_root, &op.dest_rel);
+                let moving = manifest.transfer.mode == TransferMode::Move;
                 if !previous.contains_key(&op.idx) && dest.exists() {
-                    if let Some(r) = reconcile_existing(op, &dest, &control.cancel) {
+                    // Cierre inesperado justo después de mover: el destino existe y el original ya no.
+                    let moved_already = moving
+                        && !op.src.exists()
+                        && std::fs::metadata(long_path(&dest)).map(|m| m.len() == op.size).unwrap_or(false);
+                    let reconciled = if moved_already {
+                        Some(OpResult::Done { sha256: String::new(), verified: true, origin: OriginState::Moved })
+                    } else {
+                        reconcile_existing(op, &dest, &control.cancel).map(|r| match r {
+                            OpResult::Done { sha256, verified, .. } if moving => OpResult::Done {
+                                sha256,
+                                verified,
+                                origin: remove_original(op, manifest.transfer.removal),
+                            },
+                            other => other,
+                        })
+                    };
+                    if let Some(r) = reconciled {
                         shared.bytes.fetch_add(op.size, Ordering::Relaxed);
                         shared.done.fetch_add(1, Ordering::Relaxed);
                         journal.record(op.idx, &r);
@@ -467,13 +624,33 @@ pub fn run_job(
                         name: op.dest_rel.rsplit('/').next().unwrap_or("").to_string(),
                         done: 0,
                         total: op.size,
-                        phase: "Copiando".into(),
+                        phase: if moving { "Moviendo".into() } else { "Copiando".into() },
                     },
                 );
                 let mut attempt = 0;
                 let outcome = loop {
                     let mut counted = 0u64;
-                    let r = copy_one(op, &manifest.dest_root, &manifest.settings, &shared, &mut counted);
+                    let r = if moving {
+                        match try_fast_move(op, &dest) {
+                            Ok(Some(res)) => {
+                                counted = op.size;
+                                shared.bytes.fetch_add(op.size, Ordering::Relaxed);
+                                Ok(res)
+                            }
+                            Ok(None) => copy_one(op, &manifest.dest_root, &manifest.settings, &shared, &mut counted).map(|res| match res {
+                                OpResult::Done { sha256, verified, .. } => {
+                                    if let Some(a) = shared.active.lock().unwrap().get_mut(&op.idx) {
+                                        a.phase = "Retirando original".into();
+                                    }
+                                    OpResult::Done { sha256, verified, origin: remove_original(op, manifest.transfer.removal) }
+                                }
+                                other => other,
+                            }),
+                            Err(e) => Err(e),
+                        }
+                    } else {
+                        copy_one(op, &manifest.dest_root, &manifest.settings, &shared, &mut counted)
+                    };
                     if r.is_err() {
                         shared.bytes.fetch_sub(counted, Ordering::Relaxed);
                     } else {
@@ -548,7 +725,13 @@ pub fn run_job(
     };
     on_progress(&progress_final);
     let cancelled = control.cancel.load(Ordering::Relaxed);
+    let pruned_dirs = if manifest.transfer.mode == TransferMode::Move && !cancelled {
+        prune_empty_dirs(&manifest.sources)
+    } else {
+        0
+    };
     Ok(JobOutcome {
+        pruned_dirs,
         results,
         cancelled: cancelled && control.abort_reason().is_none(),
         aborted_reason: control.abort_reason(),

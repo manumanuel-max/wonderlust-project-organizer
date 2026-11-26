@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Sidebar, Toaster } from "./components/Shell";
 import { api, events, isTauri } from "./lib/api";
 import { applyTheme, useStore } from "./lib/store";
+import { playFinishSound, primeAudio } from "./lib/sound";
+import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import CreateStructure from "./pages/CreateStructure";
 import HistoryPage from "./pages/History";
 import Home from "./pages/Home";
@@ -41,15 +43,34 @@ export default function App() {
     if (!isTauri()) return;
     const un = events.onJobFinished((e) => {
       const s = useStore.getState();
-      if (e.success) toast("success", "Copia completada y verificada.");
-      else if (e.status === "cancelled") toast("info", "Copia cancelada. Puedes reanudarla desde Inicio o Historial.");
-      else toast("error", "La copia terminó con errores o incompleta. Revisa el reporte.");
+      if (s.settings?.finishSound !== false) void playFinishSound(e.success ? "success" : "problem");
+      getCurrentWindow()
+        .requestUserAttention(UserAttentionType.Informational)
+        .catch(() => {});
+      if (e.success) toast("success", "Operación completada y verificada.");
+      else if (e.status === "cancelled") toast("info", "Operación cancelada. Puedes reanudarla desde Inicio o Historial.");
+      else toast("error", "La operación terminó con errores o incompleta. Revisa el reporte.");
       if (s.organize.jobId === e.jobId) patch({ step: "report" });
     });
     return () => {
       un.then((f) => f());
     };
   }, [toast, patch]);
+
+  // Carpetas recibidas desde el clic derecho del sistema (al abrir o con la app ya abierta).
+  useEffect(() => {
+    if (!isTauri() || !settings) return;
+    primeAudio();
+    const open = (p: string[]) => useStore.getState().openWithPaths(p);
+    api.takeLaunchPaths().then(open).catch(() => {});
+    const un = events.onOpenPaths(() => {
+      api.takeLaunchPaths().then(open).catch(() => {});
+    });
+    return () => {
+      un.then((f) => f());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!settings]);
 
   // Evitar que soltar archivos fuera de la zona abra el archivo en la ventana.
   useEffect(() => {

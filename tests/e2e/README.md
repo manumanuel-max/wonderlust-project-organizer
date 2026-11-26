@@ -24,6 +24,13 @@ cd tests/e2e && npm run reanudacion -- ../../src-tauri/target/debug/wonderlust-p
 * `e2e.mjs`: crear estructura, organizar (soltar carpeta, vista previa, secuencias ambiguas,
   conflicto con archivo existente → conservar ambos, confirmación Adobe, pausa/reanudación,
   reporte) y comprobación del resultado en disco, incluida la integridad de los originales.
+* `e2e-move.mjs`: organiza **moviendo** (ventana copiar/mover, confirmación obligatoria) y
+  comprueba que los originales salieron del origen, que se retiraron las carpetas vacías, que los
+  excluidos permanecen y que el contenido llegó íntegro.
+* `e2e-integration.mjs`: abre la app con una carpeta como argumento (como el clic derecho),
+  envía otra carpeta con la app ya abierta (instancia única; ejecutar con `dbus-run-session`),
+  y activa/desactiva el menú contextual desde Configuración.
+* `e2e-update.mjs`: actualización con firma falsa (rechazada) y válida (instalada).
 * `e2e-resume.mjs`: cierra la aplicación con `SIGKILL` a mitad de la copia, la vuelve a abrir,
   reanuda desde Inicio y comprueba que no se repiten archivos ya verificados.
 

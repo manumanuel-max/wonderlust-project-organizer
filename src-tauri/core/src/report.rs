@@ -1,6 +1,6 @@
 //! Reporte final y exportaciones (CSV, JSON, TXT y mapa de rutas).
 
-use crate::copy::{JobManifest, JobOutcome, OpResult, VerifyMode};
+use crate::copy::{JobManifest, JobOutcome, OpResult, OriginState, TransferMode, TransferOptions, VerifyMode};
 use crate::duplicates::{ExcludedEntry, OpAction};
 use crate::paths::join_rel;
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,20 @@ pub struct ReportTotals {
     pub bytes_transferred_this_run: u64,
     pub bytes_excluded: u64,
     pub bytes_failed: u64,
+    /// Modo mover: movidos en el mismo disco (renombrado).
+    #[serde(default)]
+    pub moved_same_disk: usize,
+    /// Modo mover: originales enviados a la Papelera tras verificar la copia.
+    #[serde(default)]
+    pub originals_trashed: usize,
+    /// Modo mover: originales eliminados tras verificar la copia.
+    #[serde(default)]
+    pub originals_deleted: usize,
+    /// Modo mover: copiados y verificados, pero el original no se pudo retirar.
+    #[serde(default)]
+    pub originals_not_removed: usize,
+    #[serde(default)]
+    pub pruned_dirs: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +93,8 @@ pub struct JobReport {
     pub integrity_mode: VerifyMode,
     pub integrity_message: String,
     pub totals: ReportTotals,
+    #[serde(default)]
+    pub transfer: TransferOptions,
     pub aborted_reason: Option<String>,
     pub entries: Vec<ReportEntry>,
     pub excluded: Vec<ExcludedEntry>,
@@ -89,19 +105,40 @@ pub fn build_report(manifest: &JobManifest, outcome: &JobOutcome, finished_at: S
     let mut t = ReportTotals { excluded: manifest.excluded.len(), ..Default::default() };
     t.bytes_excluded = manifest.excluded.iter().map(|e| e.size).sum();
     t.bytes_transferred_this_run = outcome.bytes_copied;
+    t.pruned_dirs = outcome.pruned_dirs;
     let mut entries = Vec::with_capacity(manifest.ops.len());
     for (op, r) in manifest.ops.iter().zip(&outcome.results) {
         if op.action == OpAction::Copy {
             t.planned += 1;
         }
         let (status, detail, sha) = match r {
-            OpResult::Done { sha256, verified } => {
+            OpResult::Done { sha256, verified, origin } => {
                 t.copied += 1;
                 t.bytes_copied += op.size;
                 if *verified {
                     t.verified += 1;
                 }
-                ("copiado", if *verified { "Verificado SHA-256".to_string() } else { "Verificado por tamaño".to_string() }, sha256.clone())
+                let base = if *verified { "Verificado SHA-256" } else { "Verificado por tamaño" };
+                let detail = match origin {
+                    OriginState::Kept => base.to_string(),
+                    OriginState::Moved => {
+                        t.moved_same_disk += 1;
+                        "Movido dentro del mismo disco (contenido intacto)".to_string()
+                    }
+                    OriginState::Trashed => {
+                        t.originals_trashed += 1;
+                        format!("{base} · original enviado a la Papelera")
+                    }
+                    OriginState::Deleted => {
+                        t.originals_deleted += 1;
+                        format!("{base} · original eliminado")
+                    }
+                    OriginState::RemovalFailed { error } => {
+                        t.originals_not_removed += 1;
+                        format!("{base} · el original NO se retiró y sigue en su sitio: {error}")
+                    }
+                };
+                ("copiado", detail, sha256.clone())
             }
             OpResult::Skipped { reason } => {
                 t.skipped += 1;
@@ -158,7 +195,27 @@ pub fn build_report(manifest: &JobManifest, outcome: &JobOutcome, finished_at: S
     } else {
         "Verificación rápida: solo se comprobó el tamaño de los archivos.".to_string()
     };
+    let mut integrity_message = integrity_message;
+    if manifest.transfer.mode == TransferMode::Move {
+        let mut parts = Vec::new();
+        if t.moved_same_disk > 0 {
+            parts.push(format!("{} movidos dentro del mismo disco", t.moved_same_disk));
+        }
+        if t.originals_trashed > 0 {
+            parts.push(format!("{} originales enviados a la Papelera tras verificar", t.originals_trashed));
+        }
+        if t.originals_deleted > 0 {
+            parts.push(format!("{} originales eliminados tras verificar", t.originals_deleted));
+        }
+        if t.originals_not_removed > 0 {
+            parts.push(format!("{} originales NO se pudieron retirar y siguen en su ubicación", t.originals_not_removed));
+        }
+        if !parts.is_empty() {
+            integrity_message = format!("{integrity_message} Mover: {}.", parts.join(", "));
+        }
+    }
     JobReport {
+        transfer: manifest.transfer,
         job_id: manifest.job_id.clone(),
         kind: manifest.kind.clone(),
         client: manifest.client.clone(),
@@ -261,7 +318,11 @@ pub fn to_txt(r: &JobReport) -> String {
     s.push_str("WONDERLUST PROJECT ORGANIZER — REPORTE DE OPERACIÓN\n");
     s.push_str(&"=".repeat(60));
     s.push('\n');
-    s.push_str(&format!("Operación:   {}\n", r.kind));
+    s.push_str(&format!(
+        "Operación:   {}{}\n",
+        r.kind,
+        if r.transfer.mode == TransferMode::Move { " (mover)" } else { " (copiar)" }
+    ));
     if !r.client.is_empty() || !r.project.is_empty() {
         s.push_str(&format!("Cliente:     {}\nProyecto:    {}\n", r.client, r.project));
     }
@@ -283,6 +344,13 @@ pub fn to_txt(r: &JobReport) -> String {
     s.push_str(&format!("Excluidos:              {} ({})\n", t.excluded, human_size(t.bytes_excluded)));
     s.push_str(&format!("Con errores:            {}\n", t.failed));
     s.push_str(&format!("Pendientes:             {}\n", t.pending));
+    if r.transfer.mode == TransferMode::Move {
+        s.push_str(&format!("Movidos en mismo disco: {}\n", t.moved_same_disk));
+        s.push_str(&format!("Originales a Papelera:  {}\n", t.originals_trashed));
+        s.push_str(&format!("Originales eliminados:  {}\n", t.originals_deleted));
+        s.push_str(&format!("Originales no retirados:{}\n", t.originals_not_removed));
+        s.push_str(&format!("Carpetas vacías retiradas del origen: {}\n", t.pruned_dirs));
+    }
     let failed: Vec<&ReportEntry> = r.entries.iter().filter(|e| e.status == "error" || e.status == "pendiente").collect();
     if !failed.is_empty() {
         s.push_str("\nARCHIVOS CON ERRORES O PENDIENTES\n");

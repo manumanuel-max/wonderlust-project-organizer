@@ -145,7 +145,10 @@ try {
   await click("Crear estructura");
   await waitText("Estructura lista");
   await shot("03-estructura-creada");
-  const created = path.join(DEST, "25.11.26 BANCO POPULAR - CAMPAÑA NAVIDAD");
+  const now = new Date();
+  const dd = (n) => String(n).padStart(2, "0");
+  const today = `${dd(now.getDate())}.${dd(now.getMonth() + 1)}.${dd(now.getFullYear() % 100)}`;
+  const created = path.join(DEST, `${today} BANCO POPULAR - CAMPAÑA NAVIDAD`);
   check(["1. imagen", "2. video", "3. audio", "4. editable", "5. archivos"].every((f) => fs.statSync(path.join(created, f)).isDirectory()), "las cinco carpetas existen");
 
   // ---- Organizar ----
@@ -205,13 +208,13 @@ try {
   await (await sel.findElement(By.css("option[value='keepBoth']"))).click();
   await sleep(600);
   await shot("11-conflicto-resuelto");
-  await click("Confirmar y copiar");
-  await waitText("Confirmar copia");
+  await click("Continuar");
+  await waitText("¿Quieres copiar o mover los archivos?");
   const ack = await driver.findElement(By.xpath(`//label[contains(., 'backup organizado de archivos')]//input[@type='checkbox']`));
   await ack.click();
   await sleep(200);
   await shot("12-confirmacion");
-  await click("Iniciar copia");
+  await click("Copiar archivos");
   await waitText("Archivos en curso", 20000);
   await sleep(700);
   await shot("13-copia-en-curso");

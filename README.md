@@ -18,8 +18,10 @@ verificados** de proyectos audiovisuales.
 | ![Inicio](docs/capturas/inicio.png) | ![Vista previa](docs/capturas/vista-previa.png) |
 | ![Verificación](docs/capturas/verificacion.png) | ![Reporte](docs/capturas/reporte.png) |
 
-**Regla de oro:** la aplicación solo copia. Los originales nunca se mueven, renombran,
-modifican, sobrescriben ni eliminan.
+**Regla de oro:** por defecto la aplicación solo **copia**: los originales nunca se mueven,
+renombran, modifican, sobrescriben ni eliminan. Al confirmar, una ventana pregunta
+**¿copiar o mover?**; si eliges mover, cada original se retira **solo después** de verificar su
+copia (en el mismo disco se renombra al instante, sin ocupar espacio extra).
 
 ---
 
@@ -36,6 +38,9 @@ modifican, sobrescriben ni eliminan.
 | **Exclusiones** | Autosaves de AE/PR, Media Cache, cachés de AE, previews de render, proxies, temporales, ocultos, sistema, carpetas vacías, extensiones y carpetas personalizadas. Muestra cantidad y peso antes de copiar. Solo afectan a la copia. |
 | **Verificación previa** | Permisos de lectura/escritura, espacio libre (con margen), existencia de rutas, conflictos, archivos inaccesibles, rutas > 260 caracteres, caracteres incompatibles con Windows, FAT32 y archivos ≥ 4 GB, destino dentro del origen (copia recursiva). |
 | **Copia segura** | Streaming con búfer configurable, en segundo plano, operaciones simultáneas configurables, temporal `.wlpart` → `fsync` → verificación SHA-256 por relectura → fecha original → renombrado **sin sobrescritura** atómico. Pausa, cancelación segura, reintentos, detención limpia sin espacio. |
+| **Copiar o mover** | Al confirmar se elige. *Mover* en el mismo disco = renombrado atómico instantáneo; entre discos = copia + SHA-256 + original a la **Papelera** (o eliminación definitiva, configurable). Excluidos, omitidos y conflictos se quedan en el origen; se retiran las carpetas que queden vacías (nunca la carpeta seleccionada). Si no hay espacio para copiar pero sí para mover, la app lo indica. |
+| **Clic derecho** | «Organizar con Wonderlust» en el menú contextual de carpetas: Windows (registro del usuario, lo crea el instalador), macOS (Acción rápida de Finder y arrastrar al Dock), Linux (script de Nautilus). Abre la app con la carpeta cargada; si ya está abierta, la carpeta llega a la ventana existente. |
+| **Aviso al terminar** | Sonido (distinto si hubo errores) y señal en el Dock / barra de tareas al acabar una copia o un movimiento. Desactivable. |
 | **Recuperación** | Diario JSONL por operación. Tras un cierre inesperado, la operación aparece en Inicio y se reanuda sin repetir archivos ya verificados. |
 | **Reporte** | Copiados, omitidos, excluidos, duplicados, errores, pendientes, tamaño, tiempo, destino e integridad. Exporta CSV, JSON, TXT y **mapa de rutas** original → nueva. Reintentar solo fallidos. Nunca declara éxito si hay pendientes o errores. |
 | **Adobe** | Detecta AEP/AEPX/PRPROJ, advierte de vínculos rotos al reorganizar, ofrece *Backup conservando jerarquía*, recomienda *Collect Files* / *Project Manager*, genera el mapa de rutas y diferencia backup organizado de proyecto recopilado. No promete revinculación automática. |
@@ -43,7 +48,8 @@ modifican, sobrescriben ni eliminan.
 | **Configuración** | Reglas de clasificación, exclusiones, secuencias, patrones de renders, duplicados, rutas frecuentes, nomenclatura, integridad, rendimiento, tema oscuro/claro. Guardado local. |
 
 Detalles técnicos y decisiones: [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
-Guía de uso para el equipo: [`docs/MANUAL.md`](docs/MANUAL.md).
+Guía de uso para el equipo: [`docs/MANUAL.md`](docs/MANUAL.md). Instalación para el equipo:
+[`docs/INSTALAR.md`](docs/INSTALAR.md).
 
 ## Estado por fases
 
@@ -54,6 +60,24 @@ Guía de uso para el equipo: [`docs/MANUAL.md`](docs/MANUAL.md).
 | 3. Avanzado (duplicados, exclusiones, renders, validación, historial, reportes, reanudación) | ✅ Implementada y probada |
 | 4. Google Drive (API) | ⏳ **Pendiente.** Requiere un ID de cliente OAuth de Wonderlust en Google Cloud. Hoy funciona con **Google Drive para escritorio** como destino local (se detecta automáticamente). |
 | 5. Distribución | ✅ Workflow de CI para `.exe`/`.msi` (Windows) y `.app`/`.dmg` (macOS). Sin firma de código hasta configurar certificados. |
+
+## Actualizaciones ("Buscar actualizaciones")
+
+La app incluye un botón **Buscar actualizaciones** (barra lateral y *Configuración*): detecta una
+versión nueva, la descarga, **verifica su firma digital** y la instala; luego pide reiniciar. Una
+actualización con firma no válida se rechaza sin tocar nada. No se puede actualizar durante una
+copia o un movimiento.
+
+* **Canal:** `https://github.com/<usuario>/<repositorio>/releases/latest/download/latest.json`
+  (el repositorio debe ser público). La URL se fija sola en GitHub Actions.
+* **Firma:** clave pública en `src-tauri/tauri.conf.json`; la clave privada y su contraseña se
+  guardan como secretos `TAURI_SIGNING_PRIVATE_KEY` y `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+  **Si se pierden, las apps instaladas ya no podrán actualizarse** (habría que reinstalar).
+* **Publicar una versión:** subir el número de versión en `package.json`,
+  `src-tauri/Cargo.toml` y `src-tauri/tauri.conf.json` (por ejemplo `0.2.0`) y crear la etiqueta
+  `v0.2.0` (en GitHub: *Releases → Draft a new release → Choose a tag → v0.2.0 → Publish*). El
+  trabajo **publicar** compila Windows, macOS y Linux, firma las actualizaciones y publica la
+  Release con `latest.json`. Las apps instaladas la verán al pulsar *Buscar actualizaciones*.
 
 ## Descargar / instalar
 
@@ -117,10 +141,10 @@ según la [guía de Tauri](https://v2.tauri.app/distribute/sign/windows/).
 
 | Comando | Cubre |
 |---|---|
-| `npm run test:core` | 81 pruebas unitarias y 11 de integración del núcleo en Rust (clasificación, mayúsculas, extensiones desconocidas, secuencias completas e incompletas, conflictos, duplicados, archivos grandes, cancelación, interrupciones, reanudación, permisos, espacio, nombres con tildes y caracteres especiales, destino dentro del origen, conservación de originales). |
+| `npm run test:core` | 81 pruebas unitarias y 16 de integración del núcleo en Rust (clasificación, mayúsculas, extensiones desconocidas, secuencias completas e incompletas, conflictos, duplicados, archivos grandes, cancelación, interrupciones, reanudación, permisos, espacio, nombres con tildes y caracteres especiales, destino dentro del origen, conservación de originales). |
 | `npm test` | Utilidades del frontend (Vitest). |
 | `npm run typecheck` | Tipos TypeScript. |
-| `tests/e2e` | Pruebas de extremo a extremo de la aplicación compilada con WebDriver (Linux). Ver [`tests/e2e/README.md`](tests/e2e/README.md). |
+| `tests/e2e` | Pruebas de extremo a extremo (incluye `e2e-update.mjs`: actualización con firma falsa rechazada y con firma válida instalada) de la aplicación compilada con WebDriver (Linux). Ver [`tests/e2e/README.md`](tests/e2e/README.md). |
 
 La prueba de disco lleno se ejecuta si se define `WPO_SMALL_FS_DIR` apuntando a un sistema de
 archivos pequeño (por ejemplo, un tmpfs de 2 MB). Las pruebas de permisos se ejecutan con un

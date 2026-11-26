@@ -247,7 +247,16 @@ export interface PreflightIssue {
   count: number;
 }
 
+export type TransferMode = "copy" | "move";
+export type RemovalMode = "trash" | "delete";
+export interface TransferOptions {
+  mode: TransferMode;
+  removal: RemovalMode;
+}
+
 export interface PreflightReport {
+  requiredBytesMove: number;
+  copyPossible: boolean;
   ok: boolean;
   issues: PreflightIssue[];
   requiredBytes: number;
@@ -305,6 +314,11 @@ export interface ReportTotals {
   bytesTransferredThisRun: number;
   bytesExcluded: number;
   bytesFailed: number;
+  movedSameDisk: number;
+  originalsTrashed: number;
+  originalsDeleted: number;
+  originalsNotRemoved: number;
+  prunedDirs: number;
 }
 
 export interface ReportEntry {
@@ -343,6 +357,7 @@ export interface JobReport {
   integrityMode: "full" | "size";
   integrityMessage: string;
   totals: ReportTotals;
+  transfer: TransferOptions;
   abortedReason: string | null;
   excluded: ExcludedEntry[];
   warnings: string[];
@@ -385,6 +400,9 @@ export interface AppSettings {
   frequentPaths: { label: string; path: string }[];
   recentDestinations: string[];
   writeReportToDestination: boolean;
+  moveRemoval: RemovalMode;
+  contextMenu: boolean;
+  finishSound: boolean;
 }
 
 export interface HistoryEntry {
@@ -392,7 +410,7 @@ export interface HistoryEntry {
   date: string;
   client: string;
   project: string;
-  kind: "structure" | "organize" | "backup";
+  kind: "structure" | "organize" | "backup" | "move";
   destination: string;
   files: number;
   size: number;
@@ -443,6 +461,7 @@ export interface JobStatus {
   client: string;
   project: string;
   destRoot: string;
+  transfer: TransferOptions;
 }
 
 export interface PathInfo {

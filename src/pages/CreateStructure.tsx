@@ -156,7 +156,7 @@ export default function CreateStructure() {
               <div key={c.key} className="flex items-center gap-2 pl-2 text-muted">
                 <span className="text-faint">{i === CATEGORIES.length - 1 ? "└──" : "├──"}</span>
                 <span className={cx("h-2 w-2 rounded-full", CAT_DOT[c.key])} />
-                <span className={check?.rootExists && !check.missingFolders.includes(c.folder) ? "text-faint line-through" : ""}>{c.folder}/</span>
+                <span className={!result && check?.rootExists && !check.missingFolders.includes(c.folder) ? "text-faint line-through" : ""}>{c.folder}/</span>
               </div>
             ))}
           </div>
