@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root,
+:root.dark {
+  --bg: 13 14 17;
+  --panel: 20 22 27;
+  --raised: 28 31 38;
+  --line: 40 44 53;
+  --fg: 236 237 241;
+  --muted: 154 160 172;
+  --faint: 98 104 116;
+  --accent: 255 112 77;
+  --ok: 84 214 152;
+  --warn: 250 184 70;
+  --danger: 248 92 92;
+  --cat-imagen: 255 122 89;
+  --cat-video: 255 176 72;
+  --cat-audio: 120 220 170;
+  --cat-editable: 110 170 255;
+  --cat-archivos: 190 140 255;
+  color-scheme: dark;
+}
+
+:root.light {
+  --bg: 244 244 246;
+  --panel: 255 255 255;
+  --raised: 247 247 249;
+  --line: 224 225 230;
+  --fg: 22 23 28;
+  --muted: 92 97 110;
+  --faint: 150 155 166;
+  --accent: 232 84 48;
+  --ok: 22 150 96;
+  --warn: 196 128 10;
+  --danger: 214 52 52;
+  --cat-imagen: 226 88 56;
+  --cat-video: 214 132 18;
+  --cat-audio: 30 160 108;
+  --cat-editable: 50 120 230;
+  --cat-archivos: 140 86 220;
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg text-fg antialiased;
+  font-size: 13px;
+  font-family: Inter, "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+}
+
+input,
+textarea,
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--line));
+  border-radius: 10px;
+  border: 2px solid rgb(var(--panel));
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*:focus-visible {
+  outline: 2px solid rgb(var(--accent) / 0.7);
+  outline-offset: 1px;
+}
+
+.mono {
+  font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.stripes {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgb(255 255 255 / 0.12) 0 8px,
+    transparent 8px 16px
+  );
+  background-size: 22px 22px;
+  animation: stripes 0.8s linear infinite;
+}
+@keyframes stripes {
+  to {
+    background-position: 22px 0;
+  }
+}

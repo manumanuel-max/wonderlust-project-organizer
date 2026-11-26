@@ -1,0 +1,12 @@
+{
+  "name": "wpo-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "flujo": "node e2e.mjs",
+    "reanudacion": "node e2e-resume.mjs"
+  },
+  "devDependencies": {
+    "selenium-webdriver": "4.25.0"
+  }
+}
