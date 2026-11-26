@@ -34,5 +34,6 @@ está en **Mostrar más opciones** (o con **Mayús + clic derecho**).
   ni mueve nada hasta que confirmes.
 * **Sonido al terminar:** suena al acabar una copia o un movimiento (otro tono si hubo errores).
   Se puede apagar en *Configuración → Menú contextual y avisos*.
-* **Actualizaciones:** *Buscar actualizaciones* en la barra lateral. Se instalan solas tras
-  verificar la firma; solo hay que reiniciar la app.
+* **Actualizaciones:** mientras se habilita el canal firmado, descarga el instalador nuevo
+  desde **Releases → Assets** para actualizar. Cuando se publique una versión firmada,
+  podrás usar *Buscar actualizaciones* en la barra lateral.

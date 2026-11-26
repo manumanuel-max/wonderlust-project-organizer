@@ -110,11 +110,27 @@ jobs:
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage
 
+  firma_actualizador:
+    name: Comprobar clave del actualizador
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    outputs:
+      configurada: ${{ steps.clave.outputs.configurada }}
+    steps:
+      - id: clave
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [[ -n "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+            echo 'configurada=true' >> "$GITHUB_OUTPUT"
+          fi
+
   publicar:
     name: Publicar versión ${{ github.ref_name }} (${{ matrix.name }})
     # Se ejecuta al crear una etiqueta vX.Y.Z. Publica una Release con instaladores firmados
     # para el actualizador y el archivo latest.json que consulta "Buscar actualizaciones".
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [pruebas, firma_actualizador]
+    if: needs.firma_actualizador.outputs.configurada == 'true'
     permissions:
       contents: write
     strategy:
@@ -149,17 +165,28 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - uses: tauri-apps/tauri-action@v0
+      - name: Preparar firma opcional de Apple
+        if: matrix.os == 'macos-latest'
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for variable in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [[ -n "${!variable}" ]]; then
+              delimitador=$(uuidgen)
+              printf '%s<<%s\n%s\n%s\n' "$variable" "$delimitador" "${!variable}" "$delimitador" >> "$GITHUB_ENV"
+            fi
+          done
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Wonderlust Project Organizer ${{ github.ref_name }}
