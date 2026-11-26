@@ -168,8 +168,14 @@ pub fn is_within(child: &Path, parent: &Path) -> bool {
 pub fn long_path(p: &Path) -> PathBuf {
     #[cfg(windows)]
     {
-        let s = p.as_os_str().to_string_lossy();
-        if p.is_absolute() && !s.starts_with(r"\\?\") {
+        let original = p.as_os_str().to_string_lossy();
+        if p.is_absolute() && !original.starts_with(r"\\?\") && !original.starts_with(r"\\.\") {
+            // El prefijo extendido desactiva la normalización de Win32.
+            let normalized = match std::path::absolute(p) {
+                Ok(path) => path,
+                Err(_) => return p.to_path_buf(),
+            };
+            let s = normalized.as_os_str().to_string_lossy();
             if let Some(rest) = s.strip_prefix(r"\\") {
                 return PathBuf::from(format!(r"\\?\UNC\{rest}"));
             }
