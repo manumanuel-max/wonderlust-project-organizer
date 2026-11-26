@@ -489,6 +489,8 @@ pub fn run_job(
     on_progress: impl Fn(&Progress) + Sync,
 ) -> CoreResult<JobOutcome> {
     let started = Instant::now();
+    let mut move_settings = manifest.settings.clone();
+    move_settings.verify = VerifyMode::Full;
     let previous = Journal::load(journal_path);
     let journal = Journal::open(journal_path)?;
     let mut results: Vec<OpResult> = manifest
@@ -637,7 +639,7 @@ pub fn run_job(
                                 shared.bytes.fetch_add(op.size, Ordering::Relaxed);
                                 Ok(res)
                             }
-                            Ok(None) => copy_one(op, &manifest.dest_root, &manifest.settings, &shared, &mut counted).map(|res| match res {
+                            Ok(None) => copy_one(op, &manifest.dest_root, &move_settings, &shared, &mut counted).map(|res| match res {
                                 OpResult::Done { sha256, verified, .. } => {
                                     if let Some(a) = shared.active.lock().unwrap().get_mut(&op.idx) {
                                         a.phase = "Retirando original".into();
