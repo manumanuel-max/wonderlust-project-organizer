@@ -1,0 +1,47 @@
+name: Adjuntar instaladores a una versión
+
+on:
+  workflow_dispatch:
+    inputs:
+      ejecucion:
+        description: ID de la compilación exitosa
+        required: true
+        type: string
+      etiqueta:
+        description: Etiqueta de la versión en borrador (vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  adjuntar:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EJECUCION: ${{ inputs.ejecucion }}
+      ETIQUETA: ${{ inputs.etiqueta }}
+    steps:
+      - name: Comprobar el borrador y la compilación
+        run: |
+          set -euo pipefail
+          [[ "$EJECUCION" =~ ^[0-9]+$ ]]
+          [[ "$ETIQUETA" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          compilado=$(gh run view "$EJECUCION" -R "$GITHUB_REPOSITORY" \
+            --json conclusion,headBranch,headSha,workflowName \
+            --jq 'select(.conclusion == "success" and .headBranch == "main" and .workflowName == "Pruebas y compilación") | .headSha')
+          destino=$(gh release view "$ETIQUETA" -R "$GITHUB_REPOSITORY" \
+            --json isDraft,targetCommitish --jq 'select(.isDraft) | .targetCommitish')
+          [[ -n "$compilado" && "$compilado" == "$destino" ]]
+      - name: Adjuntar instaladores de macOS y Windows
+        run: |
+          set -euo pipefail
+          gh run download "$EJECUCION" -R "$GITHUB_REPOSITORY" \
+            -n wonderlust-project-organizer-macos-latest -D macos
+          gh run download "$EJECUCION" -R "$GITHUB_REPOSITORY" \
+            -n wonderlust-project-organizer-windows-latest -D windows
+          mapfile -d '' archivos < <(find macos windows -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.msi' \) -print0)
+          [[ "${#archivos[@]}" -eq 3 ]]
+          gh release upload "$ETIQUETA" "${archivos[@]}" -R "$GITHUB_REPOSITORY" --clobber
