@@ -69,7 +69,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Compilar
+      - name: Compilar Windows o Linux
+        if: matrix.os != 'macos-latest'
+        run: npx tauri build ${{ matrix.args }}
+      - name: Compilar macOS
+        if: matrix.os == 'macos-latest'
+        shell: bash
         env:
           # Firma opcional. Sin estos secretos se generan instaladores sin firmar.
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -78,7 +83,14 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx tauri build ${{ matrix.args }}
+        run: |
+          # GitHub exporta los secretos sin configurar como cadenas vacías.
+          for variable in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!variable}" ]]; then
+              unset "$variable"
+            fi
+          done
+          npx tauri build ${{ matrix.args }}
       - name: Publicar artefactos
         uses: actions/upload-artifact@v4
         with:
